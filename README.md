@@ -11,13 +11,36 @@
 
 국회입법예고(pal.assembly.go.kr)의 진행 중인 입법 예고 크롤러
 
-## Install
+---
 
-```
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Installation](#installation)
+- [Base Types](#base-types)
+- [Methods](#methods)
+  - [get](#get)
+- [License](#license)
+
+---
+
+## Introduction
+
+국회입법예고(pal.assembly.go.kr) 사이트에서 진행 중인 입법 예고 데이터를 크롤링하는 도구입니다. 입법 예고의 주요 정보를 손쉽게 가져올 수 있습니다.
+
+---
+
+## Installation
+
+```bash
 npm install pal-crawl
 ```
 
+---
+
 ## Base Types
+
+`ITableData`는 크롤링된 입법 예고 데이터를 나타내는 인터페이스입니다.
 
 ```typescript
 interface ITableData {
@@ -30,9 +53,13 @@ interface ITableData {
 }
 ```
 
+---
+
 ## Methods
 
-## get: () => Promise<ITableData[]>
+### get
+
+`get` 메서드는 진행 중인 입법 예고 데이터를 가져옵니다.
 
 ```javascript
 import { PalCrawl } from 'pal-crawl';
@@ -43,6 +70,8 @@ const table = await palCrawl.get();
 console.log(table);
 ```
 
+---
+
 ## License
 
-MIT
+This project is licensed under the MIT License. See the [LICENSE](#license) section for details.
