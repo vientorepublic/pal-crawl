@@ -1,6 +1,6 @@
 {
   "name": "pal-crawl",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "description": "국회입법예고(pal.assembly.go.kr)의 진행 중인 입법 예고 크롤러",
   "license": "MIT",
   "author": "vientorepublic",
@@ -23,7 +23,6 @@
   },
   "homepage": "https://github.com/vientorepublic/pal-crawl#readme",
   "dependencies": {
-    "axios": "^1.7.9",
     "cheerio": "^1.0.0"
   },
   "devDependencies": {

@@ -1,4 +1,5 @@
-import axios, { isAxiosError } from 'axios';
+import * as https from 'https';
+import { URL } from 'url';
 import * as cheerio from 'cheerio';
 import { Config } from './config';
 
@@ -13,28 +14,41 @@ export interface ITableData {
 
 export class PalCrawl {
   public async getPalHTML(): Promise<string> {
-    try {
-      const res = await axios.get<string>(Config.URL, {
-        baseURL: Config.DOMAIN,
+    return new Promise((resolve, reject) => {
+      const url = new URL(Config.URL, Config.DOMAIN);
+      const options = {
         headers: {
           'User-Agent': Config.UserAgent,
         },
-      });
-      return res.data;
-    } catch (err) {
-      if (isAxiosError(err) && err.response) {
-        throw new Error(
-          `Invalid response: ${err.response.status} ${err.response.statusText}`,
-        );
-      } else {
-        if (err instanceof Error) {
-          throw new Error(err.message);
-        } else {
-          console.error(err);
-          throw new Error('Unknown Error');
-        }
-      }
-    }
+      };
+
+      https
+        .get(url, options, (res) => {
+          if (
+            res.statusCode &&
+            (res.statusCode < 200 || res.statusCode >= 300)
+          ) {
+            reject(
+              new Error(
+                `Invalid response: ${res.statusCode} ${res.statusMessage}`,
+              ),
+            );
+            return;
+          }
+
+          let data = '';
+          res.on('data', (chunk) => {
+            data += chunk;
+          });
+
+          res.on('end', () => {
+            resolve(data);
+          });
+        })
+        .on('error', (err) => {
+          reject(err);
+        });
+    });
   }
 
   public parseTable(html: string): ITableData[] {
