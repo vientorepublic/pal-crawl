@@ -13,6 +13,7 @@
     "test:verbose": "jest --verbose",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
+    "clean": "rm -rf dist",
     "prepack": "npm run clean && npm run build",
     "prepublishOnly": "npm run lint && npm run test && npm run build",
     "release:patch": "npm version patch && npm publish",
