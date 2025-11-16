@@ -1,6 +1,13 @@
-import { PalCrawl, type PalCrawlConfig } from './pal';
+import { ITableData, PalCrawl, type PalCrawlConfig } from './pal';
+
+let table: ITableData[];
 
 describe('PalCrawl', () => {
+  beforeAll(async () => {
+    const palCrawl = new PalCrawl();
+    table = await palCrawl.get();
+  });
+
   test('getPalHTML: should be return string', async () => {
     const palCrawl = new PalCrawl();
     const html = await palCrawl.getPalHTML();
@@ -27,9 +34,13 @@ describe('PalCrawl', () => {
     expect(table).toHaveLength(0);
   });
   test('get: array length should be 10', async () => {
-    const palCrawl = new PalCrawl();
-    const table = await palCrawl.get();
     expect(table).toHaveLength(10);
+  });
+  test('get: URL string of the attachment object should not be empty', () => {
+    table.forEach((e) => {
+      expect(e.attachments.pdfFile).not.toBe('');
+      expect(e.attachments.hwpFile).not.toBe('');
+    });
   });
   test('constructor: should use custom timeout when provided', () => {
     const config: PalCrawlConfig = {

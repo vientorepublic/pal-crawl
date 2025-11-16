@@ -85,6 +85,18 @@ interface ITableData {
   committee: string; // 소관 위원회
   numComments: number; // 의견 수
   link: string; // 전문 보기 링크
+  attachments: IAttachment; // 법률안 전문 첨부파일 URL 객체
+}
+```
+
+`IAttachment`는 입법 예고의 법률안 전문 첨부파일 URL을 나타내는 인터페이스입니다.
+
+pdf와 hwp 파일 다운로드 링크 추출을 지원합니다.
+
+```typescript
+interface IAttachment {
+  pdfFile: string;
+  hwpFile: string;
 }
 ```
 
@@ -92,7 +104,7 @@ interface ITableData {
 
 ## Methods
 
-### get
+### get() => Promise<ITableData[]>
 
 `get` 메서드는 진행 중인 입법 예고 데이터를 가져옵니다.
 
