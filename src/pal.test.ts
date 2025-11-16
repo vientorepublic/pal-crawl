@@ -1,10 +1,25 @@
-import { PalCrawl } from './pal';
+import { PalCrawl, type PalCrawlConfig } from './pal';
 
 describe('PalCrawl', () => {
   test('getPalHTML: should be return string', async () => {
     const palCrawl = new PalCrawl();
     const html = await palCrawl.getPalHTML();
     expect(typeof html).toBe('string');
+  });
+  test('constructor: should use custom userAgent when provided in config', async () => {
+    const config: PalCrawlConfig = {
+      userAgent: 'Custom User Agent',
+    };
+    const palCrawl = new PalCrawl(config);
+    expect(palCrawl).toBeInstanceOf(PalCrawl);
+  });
+  test('constructor: should use default userAgent when config is empty', async () => {
+    const palCrawl = new PalCrawl({});
+    expect(palCrawl).toBeInstanceOf(PalCrawl);
+  });
+  test('constructor: should use default userAgent when no config provided', async () => {
+    const palCrawl = new PalCrawl();
+    expect(palCrawl).toBeInstanceOf(PalCrawl);
   });
   test('parseTable: array length should be 0 when invalid html', () => {
     const palCrawl = new PalCrawl();
@@ -15,5 +30,41 @@ describe('PalCrawl', () => {
     const palCrawl = new PalCrawl();
     const table = await palCrawl.get();
     expect(table).toHaveLength(10);
+  });
+  test('constructor: should use custom timeout when provided', () => {
+    const config: PalCrawlConfig = {
+      timeout: 5000,
+    };
+    const palCrawl = new PalCrawl(config);
+    expect(palCrawl).toBeInstanceOf(PalCrawl);
+  });
+  test('constructor: should use custom retryCount when provided', () => {
+    const config: PalCrawlConfig = {
+      retryCount: 5,
+    };
+    const palCrawl = new PalCrawl(config);
+    expect(palCrawl).toBeInstanceOf(PalCrawl);
+  });
+  test('constructor: should use custom headers when provided', () => {
+    const config: PalCrawlConfig = {
+      customHeaders: {
+        'Accept-Language': 'ko-KR',
+        'Custom-Header': 'test-value',
+      },
+    };
+    const palCrawl = new PalCrawl(config);
+    expect(palCrawl).toBeInstanceOf(PalCrawl);
+  });
+  test('constructor: should use all custom config options', () => {
+    const config: PalCrawlConfig = {
+      userAgent: 'Custom Agent',
+      timeout: 15000,
+      retryCount: 2,
+      customHeaders: {
+        Accept: 'application/json',
+      },
+    };
+    const palCrawl = new PalCrawl(config);
+    expect(palCrawl).toBeInstanceOf(PalCrawl);
   });
 });
