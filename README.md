@@ -17,9 +17,11 @@
 
 - [Introduction](#introduction)
 - [Installation](#installation)
+- [Configuration](#configuration)
 - [Base Types](#base-types)
 - [Methods](#methods)
   - [get](#get)
+- [Examples](#examples)
 - [License](#license)
 
 ---
@@ -34,6 +36,39 @@
 
 ```bash
 npm install pal-crawl
+```
+
+---
+
+## Configuration
+
+`PalCrawl` 클래스는 생성자에서 선택적 설정 객체를 받을 수 있습니다.
+
+```typescript
+interface PalCrawlConfig {
+  userAgent?: string; // 사용자 정의 User-Agent (기본값: Chrome User-Agent)
+  timeout?: number; // HTTP 요청 타임아웃 (밀리초, 기본값: 10000)
+  retryCount?: number; // 재시도 횟수 (기본값: 3)
+  customHeaders?: Record<string, string>; // 사용자 정의 헤더
+}
+```
+
+### 기본 사용법
+
+```typescript
+// 기본 설정으로 사용
+const palCrawl = new PalCrawl();
+
+// 사용자 정의 설정으로 사용
+const palCrawl = new PalCrawl({
+  userAgent: 'My Custom Bot 1.0',
+  timeout: 15000,
+  retryCount: 5,
+  customHeaders: {
+    'Accept-Language': 'ko-KR',
+    Accept: 'text/html,application/xhtml+xml',
+  },
+});
 ```
 
 ---
@@ -61,13 +96,81 @@ interface ITableData {
 
 `get` 메서드는 진행 중인 입법 예고 데이터를 가져옵니다.
 
-```javascript
+```typescript
 import { PalCrawl } from 'pal-crawl';
 
 const palCrawl = new PalCrawl();
 const table = await palCrawl.get();
 
 console.log(table);
+```
+
+---
+
+## Examples
+
+### 기본 사용법
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+const data = await palCrawl.get();
+console.log(data);
+```
+
+### 사용자 정의 User-Agent 사용
+
+```typescript
+import { PalCrawl, type PalCrawlConfig } from 'pal-crawl';
+
+const config: PalCrawlConfig = {
+  userAgent: 'MyBot/1.0 (https://example.com)',
+};
+
+const palCrawl = new PalCrawl(config);
+const data = await palCrawl.get();
+```
+
+### 고급 설정 (타임아웃, 재시도, 헤더)
+
+```typescript
+import { PalCrawl, type PalCrawlConfig } from 'pal-crawl';
+
+const config: PalCrawlConfig = {
+  userAgent: 'Advanced Bot 2.0',
+  timeout: 20000, // 20초 타임아웃
+  retryCount: 2, // 2회 재시도
+  customHeaders: {
+    'Accept-Language': 'ko-KR',
+    'Cache-Control': 'no-cache',
+  },
+};
+
+const palCrawl = new PalCrawl(config);
+const data = await palCrawl.get();
+```
+
+### 에러 처리
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl({
+  timeout: 5000,
+  retryCount: 3,
+});
+
+try {
+  const data = await palCrawl.get();
+  console.log('입법예고 데이터:', data);
+} catch (error) {
+  if (error.message.includes('timeout')) {
+    console.error('요청 타임아웃:', error.message);
+  } else {
+    console.error('크롤링 실패:', error.message);
+  }
+}
 ```
 
 ---

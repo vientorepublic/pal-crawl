@@ -3,6 +3,13 @@ import { URL } from 'url';
 import * as cheerio from 'cheerio';
 import { Config } from './config';
 
+export interface PalCrawlConfig {
+  userAgent?: string;
+  timeout?: number;
+  retryCount?: number;
+  customHeaders?: Record<string, string>;
+}
+
 export interface ITableData {
   num: number;
   subject: string;
@@ -13,42 +20,82 @@ export interface ITableData {
 }
 
 export class PalCrawl {
-  public async getPalHTML(): Promise<string> {
+  private userAgent: string;
+  private timeout: number;
+  private retryCount: number;
+  private customHeaders: Record<string, string>;
+
+  constructor(config?: PalCrawlConfig) {
+    this.userAgent = config?.userAgent ?? Config.UserAgent;
+    this.timeout = config?.timeout ?? 10000; // Default 10 seconds
+    this.retryCount = config?.retryCount ?? 3; // Default 3 attempts
+    this.customHeaders = config?.customHeaders ?? {};
+  }
+
+  private async makeRequest(): Promise<string> {
     return new Promise((resolve, reject) => {
       const url = new URL(Config.URL, Config.DOMAIN);
-      const options = {
-        headers: {
-          'User-Agent': Config.UserAgent,
-        },
+      const headers = {
+        'User-Agent': this.userAgent,
+        ...this.customHeaders,
       };
 
-      https
-        .get(url, options, (res) => {
-          if (
-            res.statusCode &&
-            (res.statusCode < 200 || res.statusCode >= 300)
-          ) {
-            reject(
-              new Error(
-                `Invalid response: ${res.statusCode} ${res.statusMessage}`,
-              ),
-            );
-            return;
-          }
+      const options = {
+        headers,
+        timeout: this.timeout,
+      };
 
-          let data = '';
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
+      const req = https.get(url, options, (res) => {
+        if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+          reject(
+            new Error(
+              `Invalid response: ${res.statusCode} ${res.statusMessage}`,
+            ),
+          );
+          return;
+        }
 
-          res.on('end', () => {
-            resolve(data);
-          });
-        })
-        .on('error', (err) => {
-          reject(err);
+        let data = '';
+        res.on('data', (chunk) => {
+          data += chunk;
         });
+
+        res.on('end', () => {
+          resolve(data);
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error(`Request timeout after ${this.timeout}ms`));
+      });
+
+      req.on('error', (err) => {
+        reject(err);
+      });
+
+      req.setTimeout(this.timeout);
     });
+  }
+
+  public async getPalHTML(): Promise<string> {
+    let lastError: Error;
+
+    for (let attempt = 1; attempt <= this.retryCount; attempt++) {
+      try {
+        return await this.makeRequest();
+      } catch (error) {
+        lastError = error as Error;
+
+        if (attempt < this.retryCount) {
+          // Exponential backoff before retrying
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    throw lastError!;
   }
 
   public parseTable(html: string): ITableData[] {
