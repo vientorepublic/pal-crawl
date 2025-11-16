@@ -10,6 +10,11 @@ export interface PalCrawlConfig {
   customHeaders?: Record<string, string>;
 }
 
+export interface IAttachment {
+  pdfFile: string;
+  hwpFile: string;
+}
+
 export interface ITableData {
   num: number;
   subject: string;
@@ -17,6 +22,7 @@ export interface ITableData {
   committee: string;
   numComments: number;
   link: string;
+  attachments: IAttachment;
 }
 
 export class PalCrawl {
@@ -117,6 +123,16 @@ export class PalCrawl {
         if (link) {
           boardLink = Config.DOMAIN + link;
         }
+        const pdfFile = $(el)
+          .find('td:nth-child(6) > a:nth-child(3)')
+          .attr('href');
+        const hwpFile = $(el)
+          .find('td:nth-child(6) > a:nth-child(2)')
+          .attr('href');
+        const attachments: IAttachment = {
+          pdfFile,
+          hwpFile,
+        };
         output.push({
           num,
           subject,
@@ -124,6 +140,7 @@ export class PalCrawl {
           committee,
           numComments,
           link: boardLink,
+          attachments,
         });
       }
     });
