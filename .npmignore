@@ -1,0 +1,4 @@
+src/
+!/dist/**
+.github/
+coverage/
