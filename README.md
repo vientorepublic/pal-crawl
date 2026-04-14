@@ -21,6 +21,8 @@
 - [Base Types](#base-types)
 - [Methods](#methods)
   - [get](#get)
+  - [getContentHTML](#getcontenthtml--promisestring)
+  - [getContent](#getcontentid-string--promiseicontentdata)
 - [Examples](#examples)
 - [License](#license)
 
@@ -85,6 +87,7 @@ interface ITableData {
   committee: string; // 소관 위원회
   numComments: number; // 의견 수
   link: string; // 전문 보기 링크
+  contentId: string | null; // 링크에서 추출한 본문 조회용 의안 ID
   attachments: IAttachment; // 법률안 전문 첨부파일 URL 객체
 }
 ```
@@ -93,12 +96,20 @@ interface ITableData {
 
 pdf와 hwp 파일 다운로드 링크 추출을 지원합니다.
 
-```typescript
+````typescript
 interface IAttachment {
-  pdfFile: string;
-  hwpFile: string;
+  pdfFile: string | null;
+  hwpFile: string | null;
 }
-```
+
+`IContentData`는 입법예고 본문 요약 데이터를 나타내는 인터페이스입니다.
+
+```typescript
+interface IContentData {
+  title: string; // 본문 페이지 제목
+  proposalReason: string | null; // "제안이유 및 주요내용" (한 줄 문자열)
+}
+````
 
 ---
 
@@ -108,6 +119,8 @@ interface IAttachment {
 
 `get` 메서드는 진행 중인 입법 예고 데이터를 가져옵니다.
 
+반환되는 각 항목에는 `contentId`가 포함되며, 이 값을 `getContentHTML` 또는 `getContent`에 전달해 본문 조회를 바로 수행할 수 있습니다.
+
 ```typescript
 import { PalCrawl } from 'pal-crawl';
 
@@ -115,6 +128,40 @@ const palCrawl = new PalCrawl();
 const table = await palCrawl.get();
 
 console.log(table);
+```
+
+### getContentHTML(id: string) => Promise<string>
+
+`getContentHTML` 메서드는 특정 의안 ID의 본문 페이지 HTML 원문을 가져옵니다.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+const table = await palCrawl.get();
+
+const id = table[0]?.contentId;
+if (id) {
+  const contentHtml = await palCrawl.getContentHTML(id);
+  console.log(contentHtml);
+}
+```
+
+### getContent(id: string) => Promise<IContentData>
+
+`getContent` 메서드는 특정 의안 ID의 본문 페이지를 파싱해 JSON 객체(`IContentData`)로 반환합니다.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+const content = await palCrawl.getContent('PRC_W2W6V0D4D0B9C1B4B4Z6V2W0U7V2T9');
+
+console.log(content);
+// {
+//   title: '[2218288] 조세특례제한법 일부개정법률안(윤한홍의원 등 10인)',
+//   proposalReason: '...'
+// }
 ```
 
 ---
@@ -129,6 +176,22 @@ import { PalCrawl } from 'pal-crawl';
 const palCrawl = new PalCrawl();
 const data = await palCrawl.get();
 console.log(data);
+```
+
+### 목록에서 contentId를 이용해 본문 가져오기
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+const table = await palCrawl.get();
+
+const first = table.find((item) => item.contentId);
+if (first?.contentId) {
+  const content = await palCrawl.getContent(first.contentId);
+  console.log(content.title);
+  console.log(content.proposalReason);
+}
 ```
 
 ### 사용자 정의 User-Agent 사용
