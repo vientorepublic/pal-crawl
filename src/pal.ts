@@ -1,7 +1,7 @@
-import * as https from 'https';
 import { URL } from 'url';
 import * as cheerio from 'cheerio';
 import { Config } from './config';
+import { HttpClient } from './http-client';
 
 export interface PalCrawlConfig {
   userAgent?: string;
@@ -11,8 +11,8 @@ export interface PalCrawlConfig {
 }
 
 export interface IAttachment {
-  pdfFile: string;
-  hwpFile: string;
+  pdfFile: string | null;
+  hwpFile: string | null;
 }
 
 export interface ITableData {
@@ -22,86 +22,41 @@ export interface ITableData {
   committee: string;
   numComments: number;
   link: string;
+  contentId: string | null;
   attachments: IAttachment;
 }
 
+export interface IContentData {
+  title: string;
+  proposalReason: string | null;
+}
+
 export class PalCrawl {
-  private userAgent: string;
-  private timeout: number;
-  private retryCount: number;
-  private customHeaders: Record<string, string>;
+  private readonly httpClient: HttpClient;
 
   constructor(config?: PalCrawlConfig) {
-    this.userAgent = config?.userAgent ?? Config.UserAgent;
-    this.timeout = config?.timeout ?? 10000; // Default 10 seconds
-    this.retryCount = config?.retryCount ?? 3; // Default 3 attempts
-    this.customHeaders = config?.customHeaders ?? {};
-  }
-
-  private async makeRequest(): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const url = new URL(Config.URL, Config.DOMAIN);
-      const headers = {
-        'User-Agent': this.userAgent,
-        ...this.customHeaders,
-      };
-
-      const options = {
-        headers,
-        timeout: this.timeout,
-      };
-
-      const req = https.get(url, options, (res) => {
-        if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
-          reject(
-            new Error(
-              `Invalid response: ${res.statusCode} ${res.statusMessage}`,
-            ),
-          );
-          return;
-        }
-
-        let data = '';
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        res.on('end', () => {
-          resolve(data);
-        });
-      });
-
-      req.on('timeout', () => {
-        req.destroy();
-        reject(new Error(`Request timeout after ${this.timeout}ms`));
-      });
-
-      req.on('error', (err) => {
-        reject(err);
-      });
-
-      req.setTimeout(this.timeout);
+    this.httpClient = new HttpClient({
+      userAgent: config?.userAgent ?? Config.UserAgent,
+      timeout: config?.timeout ?? 10000,
+      retryCount: config?.retryCount ?? 3,
+      customHeaders: config?.customHeaders ?? {},
     });
   }
 
   public async getPalHTML(): Promise<string> {
-    let lastError: Error;
+    const url = new URL(Config.LIST_URL, Config.DOMAIN);
+    return this.httpClient.get(url);
+  }
 
-    for (let attempt = 1; attempt <= this.retryCount; attempt++) {
-      try {
-        return await this.makeRequest();
-      } catch (error) {
-        lastError = error as Error;
-
-        if (attempt < this.retryCount) {
-          // Exponential backoff before retrying
-          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      }
+  private extractContentId(link: string): string | null {
+    try {
+      const url = new URL(link, Config.DOMAIN);
+      return (
+        url.searchParams.get('lgsltPaId') ?? url.searchParams.get('lgsltPaid')
+      );
+    } catch {
+      return null;
     }
-
-    throw lastError!;
   }
 
   public parseTable(html: string): ITableData[] {
@@ -109,7 +64,7 @@ export class PalCrawl {
     const body = $('body');
     const table = body.find('table > tbody > tr');
     const output: ITableData[] = [];
-    table.map((i, el) => {
+    table.map((_i, el) => {
       const subject = $(el).find('td.td_block > a.board_subject').text().trim();
       if (subject) {
         const link = $(el).find('td.td_block > a.board_subject').attr('href');
@@ -123,16 +78,15 @@ export class PalCrawl {
         if (link) {
           boardLink = Config.DOMAIN + link;
         }
-        const pdfFile = $(el)
-          .find('td:nth-child(6) > a:nth-child(3)')
-          .attr('href');
-        const hwpFile = $(el)
-          .find('td:nth-child(6) > a:nth-child(2)')
-          .attr('href');
+        const pdfFile =
+          $(el).find('td:nth-child(6) > a:nth-child(3)').attr('href') ?? null;
+        const hwpFile =
+          $(el).find('td:nth-child(6) > a:nth-child(2)').attr('href') ?? null;
         const attachments: IAttachment = {
           pdfFile,
           hwpFile,
         };
+        const contentId = boardLink ? this.extractContentId(boardLink) : null;
         output.push({
           num,
           subject,
@@ -140,6 +94,7 @@ export class PalCrawl {
           committee,
           numComments,
           link: boardLink,
+          contentId,
           attachments,
         });
       }
@@ -147,9 +102,91 @@ export class PalCrawl {
     return output;
   }
 
+  private normalizeText(text: string): string {
+    return text
+      .replace(/\u00a0/g, ' ')
+      .replace(/\r/g, '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private toSingleLine(text: string): string {
+    return text.replace(/\s+/g, ' ').trim();
+  }
+
+  public parseContent(html: string): IContentData {
+    const $ = cheerio.load(html);
+
+    const title = this.normalizeText(
+      $('.legislation-heading h3').first().text() || $('h3').first().text(),
+    );
+
+    const sections: Record<string, string> = {};
+
+    $('.card-wrap .item').each((_, item) => {
+      const heading = this.normalizeText($(item).find('h4').first().text());
+      if (!heading) {
+        return;
+      }
+
+      const descText = this.normalizeText($(item).find('.desc').first().text());
+      if (!descText) {
+        sections[heading] = '';
+        return;
+      }
+
+      const normalizedHeading = heading.replace(/\s+/g, '');
+      const lines = descText.split('\n').filter(Boolean);
+      const firstLine = lines[0]?.replace(/\s+/g, '') ?? '';
+
+      // The first line sometimes repeats the section heading itself.
+      const content =
+        firstLine === normalizedHeading
+          ? this.normalizeText(lines.slice(1).join('\n'))
+          : descText;
+
+      sections[heading] = content;
+    });
+
+    const proposalReasonRaw =
+      Object.entries(sections).find(([heading]) =>
+        heading.replace(/\s+/g, '').includes('제안이유및주요내용'),
+      )?.[1] ?? null;
+
+    const proposalReason = proposalReasonRaw
+      ? this.toSingleLine(proposalReasonRaw)
+      : null;
+
+    return {
+      title,
+      proposalReason,
+    };
+  }
+
   public async get(): Promise<ITableData[]> {
     const html = await this.getPalHTML();
     const table = this.parseTable(html);
     return table;
+  }
+
+  public async getContentHTML(id: string): Promise<string> {
+    const normalizedId = id.trim();
+    if (!normalizedId) {
+      throw new Error('id is required');
+    }
+
+    const url = new URL(Config.CONTENT_URL, Config.DOMAIN);
+    url.searchParams.set('lgsltPaid', normalizedId);
+    // Keep compatibility with currently used query key on the website.
+    url.searchParams.set('lgsltPaId', normalizedId);
+
+    return this.httpClient.get(url);
+  }
+
+  public async getContent(id: string): Promise<IContentData> {
+    const html = await this.getContentHTML(id);
+    return this.parseContent(html);
   }
 }
