@@ -1,17 +1,29 @@
 import { ITableData, PalCrawl, type PalCrawlConfig } from './pal';
 
+const FIXED_CONTENT_ID = 'PRC_W2W6V0D4D0B9C1B4B4Z6V2W0U7V2T9';
+
 let table: ITableData[];
+let listHtml = '';
+let contentHtml = '';
+let fixedContent: Awaited<ReturnType<PalCrawl['getContent']>>;
 
 describe('PalCrawl', () => {
+  const palCrawl = new PalCrawl();
+
   beforeAll(async () => {
-    const palCrawl = new PalCrawl();
-    table = await palCrawl.get();
+    [listHtml, contentHtml] = await Promise.all([
+      palCrawl.getPalHTML(),
+      palCrawl.getContentHTML(FIXED_CONTENT_ID),
+    ]);
+    table = palCrawl.parseTable(listHtml);
+    console.debug(table);
+    fixedContent = palCrawl.parseContent(contentHtml);
+    console.debug(fixedContent);
   });
 
-  test('getPalHTML: should be return string', async () => {
-    const palCrawl = new PalCrawl();
-    const html = await palCrawl.getPalHTML();
-    expect(typeof html).toBe('string');
+  test('getPalHTML: should be return string', () => {
+    expect(typeof listHtml).toBe('string');
+    expect(listHtml).not.toContain('�');
   });
   test('constructor: should use custom userAgent when provided in config', async () => {
     const config: PalCrawlConfig = {
@@ -33,6 +45,50 @@ describe('PalCrawl', () => {
     const table = palCrawl.parseTable('asdf');
     expect(table).toHaveLength(0);
   });
+  test('parseContent: should parse title, reason, and opinion submission method', () => {
+    const palCrawl = new PalCrawl();
+    const html = `
+      <div class="legislation-heading">
+        <h3>[2218288] 조세특례제한법 일부개정법률안(윤한홍의원 등 10인)</h3>
+      </div>
+      <div class="card-wrap">
+        <div class="item">
+          <h4>제안이유 및 주요내용</h4>
+          <div class="desc">
+            제안이유 및 주요내용
+            <br/>첫 번째 문장
+            <br/>두 번째 문장
+          </div>
+        </div>
+        <div class="item">
+          <h4>의견제출 방법</h4>
+          <div class="desc">국회 재정경제기획위원회</div>
+        </div>
+        <div class="item item-means">
+          <div class="desc">제출방법: 상단 의견등록 탭 사용</div>
+        </div>
+      </div>
+    `;
+
+    const content = palCrawl.parseContent(html);
+
+    expect(content.title).toContain('조세특례제한법 일부개정법률안');
+    expect(content.proposalReason).toBe('첫 번째 문장 두 번째 문장');
+  });
+  test('getContentHTML: should prefetch real content html by fixed id', () => {
+    expect(typeof contentHtml).toBe('string');
+    expect(contentHtml.length).toBeGreaterThan(0);
+  });
+
+  test('getContent: should parse prefetched content html by fixed id', () => {
+    const content = fixedContent;
+
+    expect(content.title.length).toBeGreaterThan(0);
+    expect(content.proposalReason).not.toBeNull();
+    expect(content.proposalReason?.length ?? 0).toBeGreaterThan(0);
+    expect(content.title).not.toContain('�');
+    expect(content.proposalReason ?? '').not.toContain('�');
+  });
   test('get: array length should be 10', async () => {
     expect(table).toHaveLength(10);
   });
@@ -40,6 +96,9 @@ describe('PalCrawl', () => {
     table.forEach((e) => {
       expect(e.attachments.pdfFile).not.toBe('');
       expect(e.attachments.hwpFile).not.toBe('');
+      expect(e.subject).not.toContain('�');
+      expect(e.proposerCategory).not.toContain('�');
+      expect(e.committee).not.toContain('�');
     });
   });
   test('constructor: should use custom timeout when provided', () => {
