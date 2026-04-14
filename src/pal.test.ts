@@ -99,6 +99,8 @@ describe('PalCrawl', () => {
       expect(e.subject).not.toContain('�');
       expect(e.proposerCategory).not.toContain('�');
       expect(e.committee).not.toContain('�');
+      expect(e.contentId).not.toBeNull();
+      expect(e.contentId?.startsWith('PRC_')).toBe(true);
     });
   });
   test('constructor: should use custom timeout when provided', () => {

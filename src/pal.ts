@@ -22,6 +22,7 @@ export interface ITableData {
   committee: string;
   numComments: number;
   link: string;
+  contentId: string | null;
   attachments: IAttachment;
 }
 
@@ -45,6 +46,17 @@ export class PalCrawl {
   public async getPalHTML(): Promise<string> {
     const url = new URL(Config.LIST_URL, Config.DOMAIN);
     return this.httpClient.get(url);
+  }
+
+  private extractContentId(link: string): string | null {
+    try {
+      const url = new URL(link, Config.DOMAIN);
+      return (
+        url.searchParams.get('lgsltPaId') ?? url.searchParams.get('lgsltPaid')
+      );
+    } catch {
+      return null;
+    }
   }
 
   public parseTable(html: string): ITableData[] {
@@ -74,6 +86,7 @@ export class PalCrawl {
           pdfFile,
           hwpFile,
         };
+        const contentId = boardLink ? this.extractContentId(boardLink) : null;
         output.push({
           num,
           subject,
@@ -81,6 +94,7 @@ export class PalCrawl {
           committee,
           numComments,
           link: boardLink,
+          contentId,
           attachments,
         });
       }
