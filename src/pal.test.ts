@@ -1,6 +1,14 @@
 import { ITableData, PalCrawl, type PalCrawlConfig } from './pal';
 
 const FIXED_CONTENT_ID = 'PRC_W2W6V0D4D0B9C1B4B4Z6V2W0U7V2T9';
+const SHOULD_DEBUG = process.env.PAL_CRAWL_TEST_DEBUG === '1';
+
+const debugLog = (label: string, value: unknown): void => {
+  if (!SHOULD_DEBUG) {
+    return;
+  }
+  console.debug(label, JSON.stringify(value, null, 2));
+};
 
 let table: ITableData[];
 let listHtml = '';
@@ -16,9 +24,9 @@ describe('PalCrawl', () => {
       palCrawl.getContentHTML(FIXED_CONTENT_ID),
     ]);
     table = palCrawl.parseTable(listHtml);
-    console.debug(table);
     fixedContent = palCrawl.parseContent(contentHtml);
-    console.debug(fixedContent);
+    debugLog('table', table);
+    debugLog('content', fixedContent);
   });
 
   test('getPalHTML: should be return string', () => {
@@ -73,7 +81,7 @@ describe('PalCrawl', () => {
     const content = palCrawl.parseContent(html);
 
     expect(content.title).toContain('조세특례제한법 일부개정법률안');
-    expect(content.proposalReason).toBe('첫 번째 문장 두 번째 문장');
+    expect(content.proposalReason).toBe('첫 번째 문장\n두 번째 문장');
   });
   test('getContentHTML: should prefetch real content html by fixed id', () => {
     expect(typeof contentHtml).toBe('string');

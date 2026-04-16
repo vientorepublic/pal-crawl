@@ -96,11 +96,12 @@ interface ITableData {
 
 pdf와 hwp 파일 다운로드 링크 추출을 지원합니다.
 
-````typescript
+```typescript
 interface IAttachment {
   pdfFile: string | null;
   hwpFile: string | null;
 }
+```
 
 `IContentData`는 입법예고 본문 요약 데이터를 나타내는 인터페이스입니다.
 
@@ -109,7 +110,7 @@ interface IContentData {
   title: string; // 본문 페이지 제목
   proposalReason: string | null; // "제안이유 및 주요내용" (한 줄 문자열)
 }
-````
+```
 
 ---
 
