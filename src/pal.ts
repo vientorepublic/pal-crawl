@@ -107,13 +107,9 @@ export class PalCrawl {
       .replace(/\u00a0/g, ' ')
       .replace(/\r/g, '')
       .split('\n')
-      .map((line) => line.trim())
+      .map((line) => line.replace(/\s+/g, ' ').trim())
       .filter(Boolean)
       .join('\n');
-  }
-
-  private toSingleLine(text: string): string {
-    return text.replace(/\s+/g, ' ').trim();
   }
 
   public parseContent(html: string): IContentData {
@@ -156,7 +152,7 @@ export class PalCrawl {
       )?.[1] ?? null;
 
     const proposalReason = proposalReasonRaw
-      ? this.toSingleLine(proposalReasonRaw)
+      ? this.normalizeText(proposalReasonRaw)
       : null;
 
     return {
