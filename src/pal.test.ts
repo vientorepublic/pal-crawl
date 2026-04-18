@@ -53,11 +53,49 @@ describe('PalCrawl', () => {
     const table = palCrawl.parseTable('asdf');
     expect(table).toHaveLength(0);
   });
-  test('parseContent: should parse title, reason, and opinion submission method', () => {
+  test('parseContent: should parse title, reason, and bill information table fields', () => {
     const palCrawl = new PalCrawl();
     const html = `
       <div class="legislation-heading">
         <h3>[2218288] 조세특례제한법 일부개정법률안(윤한홍의원 등 10인)</h3>
+      </div>
+      <div class="board01 pr td_center board-added">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">의안번호</th>
+              <th scope="col">제안자</th>
+              <th scope="col">제안일</th>
+              <th scope="col">소관위원회</th>
+              <th scope="col">회부일</th>
+              <th scope="col">입법예고기간</th>
+              <th scope="col">법률안원문</th>
+              <th scope="col">제안회기</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>2218288</td>
+              <td>
+                윤한홍의원 등 10인
+                <a class="btn_sm" href="#">제안자목록</a>
+              </td>
+              <td>2026-04-01</td>
+              <td class="td_block">
+                기획재정위원회
+                <div class="m_subject">
+                  <ul class="m_date">
+                    <li>입법예고기간 : 2026-04-02~2026-04-11</li>
+                  </ul>
+                </div>
+              </td>
+              <td>2026-04-02</td>
+              <td>2026-04-02~2026-04-11</td>
+              <td><a href="#">미리보기</a></td>
+              <td>제22대(2024~2028) 제433회</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
       <div class="card-wrap">
         <div class="item">
@@ -82,6 +120,13 @@ describe('PalCrawl', () => {
 
     expect(content.title).toContain('조세특례제한법 일부개정법률안');
     expect(content.proposalReason).toBe('첫 번째 문장\n두 번째 문장');
+    expect(content.billNumber).toBe('2218288');
+    expect(content.proposer).toBe('윤한홍의원 등 10인');
+    expect(content.proposalDate).toBe('2026-04-01');
+    expect(content.committee).toBe('기획재정위원회');
+    expect(content.referralDate).toBe('2026-04-02');
+    expect(content.noticePeriod).toBe('2026-04-02~2026-04-11');
+    expect(content.proposalSession).toBe('제22대(2024~2028) 제433회');
   });
   test('getContentHTML: should prefetch real content html by fixed id', () => {
     expect(typeof contentHtml).toBe('string');
@@ -94,6 +139,13 @@ describe('PalCrawl', () => {
     expect(content.title.length).toBeGreaterThan(0);
     expect(content.proposalReason).not.toBeNull();
     expect(content.proposalReason?.length ?? 0).toBeGreaterThan(0);
+    expect(content.billNumber).not.toBeNull();
+    expect(content.proposer).not.toBeNull();
+    expect(content.proposalDate).not.toBeNull();
+    expect(content.committee).not.toBeNull();
+    expect(content.referralDate).not.toBeNull();
+    expect(content.noticePeriod).not.toBeNull();
+    expect(content.proposalSession).not.toBeNull();
     expect(content.title).not.toContain('�');
     expect(content.proposalReason ?? '').not.toContain('�');
   });

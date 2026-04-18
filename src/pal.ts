@@ -1,5 +1,6 @@
 import { URL } from 'url';
 import * as cheerio from 'cheerio';
+import type { AnyNode } from 'domhandler';
 import { Config } from './config';
 import { HttpClient } from './http-client';
 
@@ -29,6 +30,13 @@ export interface ITableData {
 export interface IContentData {
   title: string;
   proposalReason: string | null;
+  billNumber: string | null;
+  proposer: string | null;
+  proposalDate: string | null;
+  committee: string | null;
+  referralDate: string | null;
+  noticePeriod: string | null;
+  proposalSession: string | null;
 }
 
 export class PalCrawl {
@@ -112,6 +120,72 @@ export class PalCrawl {
       .join('\n');
   }
 
+  private extractTableCellText(
+    $: cheerio.CheerioAPI,
+    cell: cheerio.Cheerio<AnyNode>,
+  ): string {
+    const clonedCell = cell.clone();
+    clonedCell.find('.m_subject, script, style').remove();
+    clonedCell.find('a.btn_sm').remove();
+    return this.normalizeText($(clonedCell).text());
+  }
+
+  private parseBillInfoTable(
+    $: cheerio.CheerioAPI,
+  ): Pick<
+    IContentData,
+    | 'billNumber'
+    | 'proposer'
+    | 'proposalDate'
+    | 'committee'
+    | 'referralDate'
+    | 'noticePeriod'
+    | 'proposalSession'
+  > {
+    const table = $('.board-added table').first();
+    const row = table.find('tbody > tr').first();
+
+    if (!table.length || !row.length) {
+      return {
+        billNumber: null,
+        proposer: null,
+        proposalDate: null,
+        committee: null,
+        referralDate: null,
+        noticePeriod: null,
+        proposalSession: null,
+      };
+    }
+
+    const headers = table
+      .find('thead th')
+      .map((_, th) => this.normalizeText($(th).text()).replace(/\s+/g, ''))
+      .get();
+
+    const values = row
+      .children('td')
+      .map((_, td) => this.extractTableCellText($, $(td)))
+      .get();
+
+    const valueByHeader = new Map<string, string>();
+    headers.forEach((header, index) => {
+      const value = values[index];
+      if (value) {
+        valueByHeader.set(header, value);
+      }
+    });
+
+    return {
+      billNumber: valueByHeader.get('의안번호') ?? null,
+      proposer: valueByHeader.get('제안자') ?? null,
+      proposalDate: valueByHeader.get('제안일') ?? null,
+      committee: valueByHeader.get('소관위원회') ?? null,
+      referralDate: valueByHeader.get('회부일') ?? null,
+      noticePeriod: valueByHeader.get('입법예고기간') ?? null,
+      proposalSession: valueByHeader.get('제안회기') ?? null,
+    };
+  }
+
   public parseContent(html: string): IContentData {
     const $ = cheerio.load(html);
 
@@ -155,9 +229,18 @@ export class PalCrawl {
       ? this.normalizeText(proposalReasonRaw)
       : null;
 
+    const billInfo = this.parseBillInfoTable($);
+
     return {
       title,
       proposalReason,
+      billNumber: billInfo.billNumber,
+      proposer: billInfo.proposer,
+      proposalDate: billInfo.proposalDate,
+      committee: billInfo.committee,
+      referralDate: billInfo.referralDate,
+      noticePeriod: billInfo.noticePeriod,
+      proposalSession: billInfo.proposalSession,
     };
   }
 

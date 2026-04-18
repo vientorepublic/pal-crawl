@@ -103,12 +103,19 @@ interface IAttachment {
 }
 ```
 
-`IContentData`는 입법예고 본문 요약 데이터를 나타내는 인터페이스입니다.
+`IContentData`는 입법예고 본문 데이터를 나타내는 인터페이스입니다.
 
 ```typescript
 interface IContentData {
   title: string; // 본문 페이지 제목
-  proposalReason: string | null; // "제안이유 및 주요내용" (한 줄 문자열)
+  proposalReason: string | null; // 제안이유 및 주요내용
+  billNumber: string | null; // 의안번호
+  proposer: string | null; // 제안자
+  proposalDate: string | null; // 제안일
+  committee: string | null; // 소관위원회
+  referralDate: string | null; // 회부일
+  noticePeriod: string | null; // 입법예고기간
+  proposalSession: string | null; // 제안회기
 }
 ```
 
@@ -131,7 +138,7 @@ const table = await palCrawl.get();
 console.log(table);
 ```
 
-### getContentHTML(id: string) => Promise<string>
+### getContentHTML(id: string) => Promise\<string>
 
 `getContentHTML` 메서드는 특정 의안 ID의 본문 페이지 HTML 원문을 가져옵니다.
 
@@ -148,7 +155,7 @@ if (id) {
 }
 ```
 
-### getContent(id: string) => Promise<IContentData>
+### getContent(id: string) => Promise\<IContentData>
 
 `getContent` 메서드는 특정 의안 ID의 본문 페이지를 파싱해 JSON 객체(`IContentData`)로 반환합니다.
 
@@ -161,7 +168,14 @@ const content = await palCrawl.getContent('PRC_W2W6V0D4D0B9C1B4B4Z6V2W0U7V2T9');
 console.log(content);
 // {
 //   title: '[2218288] 조세특례제한법 일부개정법률안(윤한홍의원 등 10인)',
-//   proposalReason: '...'
+//   proposalReason: '...',
+//   billNumber: '2218288',
+//   proposer: '윤한홍의원 등 10인',
+//   proposalDate: '2026-04-01',
+//   committee: '기획재정위원회',
+//   referralDate: '2026-04-02',
+//   noticePeriod: '2026-04-02~2026-04-11',
+//   proposalSession: '제22대(2024~2028) 제433회'
 // }
 ```
 
@@ -192,6 +206,8 @@ if (first?.contentId) {
   const content = await palCrawl.getContent(first.contentId);
   console.log(content.title);
   console.log(content.proposalReason);
+  console.log(content.billNumber);
+  console.log(content.noticePeriod);
 }
 ```
 
