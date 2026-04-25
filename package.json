@@ -1,12 +1,13 @@
 {
   "name": "pal-crawl",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "국회입법예고(pal.assembly.go.kr)의 진행 중인 입법 예고 크롤러",
   "license": "MIT",
   "author": "vientorepublic",
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint \"src/**/*.ts\" --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "jest",
@@ -44,7 +45,7 @@
     "jest": "^30.0.0",
     "prettier": "^3.4.2",
     "ts-jest": "^29.2.5",
-    "typescript": "^5.7.3",
+    "typescript": "^6.0.0",
     "typescript-eslint": "^8.20.0"
   },
   "jest": {
