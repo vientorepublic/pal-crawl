@@ -4,6 +4,7 @@
     "target": "ES2020",
     "types": ["node", "jest"],
     "sourceMap": true,
+    "rootDir": "./src",
     "outDir": "./dist",
     "declaration": true,
     "skipLibCheck": true,
