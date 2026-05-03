@@ -20,9 +20,12 @@
 - [Configuration](#configuration)
 - [Base Types](#base-types)
 - [Methods](#methods)
-  - [get](#get)
-  - [getContentHTML](#getcontenthtml--promisestring)
+  - [get](#get--promiseitable-data)
+  - [getContentHTML](#getcontenthtmlid-string--promisestring)
   - [getContent](#getcontentid-string--promiseicontentdata)
+  - [getDone](#getdone--promiseitable-data)
+  - [getDoneContentHTML](#getdonecontenthtmlid-string--promisestring)
+  - [getDoneContent](#getdonecontentid-string--promiseicontentdata)
 - [Examples](#examples)
 - [License](#license)
 
@@ -123,7 +126,7 @@ interface IContentData {
 
 ## Methods
 
-### get() => Promise<ITableData[]>
+### get() => Promise\<ITableData[]>
 
 `get` 메서드는 진행 중인 입법 예고 데이터를 가져옵니다.
 
@@ -140,7 +143,7 @@ console.log(table);
 
 ### getContentHTML(id: string) => Promise\<string>
 
-`getContentHTML` 메서드는 특정 의안 ID의 본문 페이지 HTML 원문을 가져옵니다.
+`getContentHTML` 메서드는 진행 중인 입법 예고 중 특정 의안 ID의 본문 페이지 HTML 원문을 가져옵니다.
 
 ```typescript
 import { PalCrawl } from 'pal-crawl';
@@ -176,6 +179,60 @@ console.log(content);
 //   referralDate: '2026-04-02',
 //   noticePeriod: '2026-04-02~2026-04-11',
 //   proposalSession: '제22대(2024~2028) 제433회'
+// }
+```
+
+### getDone() => Promise\<ITableData[]>
+
+`getDone` 메서드는 종료된 입법 예고 데이터를 가져옵니다.
+
+반환되는 각 항목에는 `contentId`가 포함되며, 이 값을 `getDoneContentHTML` 또는 `getDoneContent`에 전달해 본문 조회를 바로 수행할 수 있습니다.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+const table = await palCrawl.getDone();
+
+console.log(table);
+```
+
+### getDoneContentHTML(id: string) => Promise\<string>
+
+`getDoneContentHTML` 메서드는 종료된 입법 예고 중 특정 의안 ID의 본문 페이지 HTML 원문을 가져옵니다.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+const table = await palCrawl.getDone();
+
+const id = table[0]?.contentId;
+if (id) {
+  const contentHtml = await palCrawl.getDoneContentHTML(id);
+  console.log(contentHtml);
+}
+```
+
+### getDoneContent(id: string) => Promise\<IContentData>
+
+`getDoneContent` 메서드는 종료된 입법 예고 중 특정 의안 ID의 본문 페이지를 파싱해 JSON 객체(`IContentData`)로 반환합니다.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+const content = await palCrawl.getDoneContent(
+  'PRC_S2R6N0M3K2J3K1J5K3S8R3P4O3P5X6',
+);
+
+console.log(content);
+// {
+//   title: '[2218503] 전자장치 부착 등에 관한 법률 일부개정법률안 (김기현의원 등 10인)',
+//   proposalReason: '...',
+//   billNumber: '2218503',
+//   proposer: '김기현의원 등 10인',
+//   ...
 // }
 ```
 
@@ -241,6 +298,24 @@ const config: PalCrawlConfig = {
 
 const palCrawl = new PalCrawl(config);
 const data = await palCrawl.get();
+```
+
+### 종료된 입법예고 목록에서 본문 가져오기
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+const table = await palCrawl.getDone();
+
+const first = table.find((item) => item.contentId);
+if (first?.contentId) {
+  const content = await palCrawl.getDoneContent(first.contentId);
+  console.log(content.title);
+  console.log(content.proposalReason);
+  console.log(content.billNumber);
+  console.log(content.noticePeriod);
+}
 ```
 
 ### 에러 처리
