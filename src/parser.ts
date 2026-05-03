@@ -31,6 +31,13 @@ export interface IContentData {
   proposalSession: string | null;
 }
 
+export interface ISearchResult {
+  total: number;
+  totalPages: number;
+  currentPage: number;
+  items: ITableData[];
+}
+
 export class PalParser {
   private extractContentId(link: string): string | null {
     try {
@@ -84,6 +91,37 @@ export class PalParser {
       }
     });
     return output;
+  }
+
+  public parseSearchResult(html: string): ISearchResult {
+    const $ = cheerio.load(html);
+    const items = this.parseTable(html);
+
+    let total = 0;
+    let currentPage = 1;
+    let totalPages = 0;
+
+    $('span').each((_, el) => {
+      const text = $(el).text();
+      const m = text.match(/건 \((\d+)\/(\d+)\s*페이지\)/);
+      if (m) {
+        currentPage = parseInt(m[1], 10);
+        totalPages = parseInt(m[2], 10);
+        const strong = $(el).prevAll('strong').first();
+        if (strong.length) {
+          total = parseInt(strong.text().replace(/,/g, ''), 10);
+        }
+        return false; // break
+      }
+    });
+
+    // Fallback: if the page count structure is absent but items were found
+    if (totalPages === 0 && items.length > 0) {
+      totalPages = 1;
+      total = items.length;
+    }
+
+    return { total, totalPages, currentPage, items };
   }
 
   private normalizeText(text: string): string {

@@ -26,6 +26,9 @@
   - [getDone](#getdone--promiseitable-data)
   - [getDoneContentHTML](#getdonecontenthtmlid-string--promisestring)
   - [getDoneContent](#getdonecontentid-string--promiseicontentdata)
+  - [search / searchDone](#searchquery-isearchquery--promiseisearchresult)
+  - [getPage / getDonePage](#getpagepageindex-number-pageunit-number--promiseitable-data)
+  - [getAllPages / getAllDonePages](#getallpagesquery-isearchquery-options-ibulkoptions--asyncgeneratorisearchresult)
 - [Examples](#examples)
 - [License](#license)
 
@@ -119,6 +122,52 @@ interface IContentData {
   referralDate: string | null; // 회부일
   noticePeriod: string | null; // 입법예고기간
   proposalSession: string | null; // 제안회기
+}
+```
+
+`ISearchResult`는 검색/페이지 조회 결과를 나타내는 인터페이스입니다.
+
+```typescript
+interface ISearchResult {
+  total: number; // 전체 건수
+  totalPages: number; // 전체 페이지 수
+  currentPage: number; // 현재 페이지
+  items: ITableData[]; // 현재 페이지 항목 목록
+}
+```
+
+`ISearchQuery`는 검색 필터 옵션을 나타내는 인터페이스입니다.
+
+```typescript
+interface ISearchQuery {
+  pageIndex?: number; // 페이지 번호 (기본값: 1)
+  pageUnit?: number; // 페이지당 항목 수 (5~9, 20, 30, 50, 100; 기본값: 10)
+  committeeId?: string; // 소관위원회 ID (예: '9700006' = 법제사법위원회)
+  billName?: string; // 법안명 검색어
+  represent?: string; // 대표발의자 검색어
+  proposers?: string; // 공동발의자 검색어 (쉼표 구분 AND 조건)
+  ppslRsonMnCn?: string; // 제안이유 검색어
+  sortCol?:
+    | 'BILL_NO'
+    | 'BILL_NAME'
+    | 'CURR_COMMITTEE'
+    | 'OPN_CNT'
+    | 'LGSLT_PA_RG_DT';
+  sortGbn?: 'DESC' | 'ASC';
+  // 종료된 입법예고 전용:
+  fromAge?: number; // 시작 대수 (예: 21)
+  toAge?: number; // 종료 대수 (예: 22)
+  billNo?: string; // 의안번호 검색어
+}
+```
+
+`IBulkOptions`는 대량 수집 시 동작을 제어하는 인터페이스입니다.
+
+```typescript
+interface IBulkOptions {
+  delayMs?: number; // 페이지 간 요청 지연 (밀리초, 기본값: 500)
+  concurrency?: number; // 동시 요청 수 (기본값: 1)
+  maxPages?: number; // 최대 수집 페이지 수 (기본값: 전체)
 }
 ```
 
@@ -238,6 +287,117 @@ console.log(content);
 
 ---
 
+### search(query?: ISearchQuery) => Promise\<ISearchResult>
+
+`search` 메서드는 진행 중인 입법 예고를 조건에 맞게 검색합니다. 검색 결과에는 총 건수, 페이지 정보, 항목 목록이 포함됩니다.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+
+// 기본 조회 (1페이지 10건)
+const result = await palCrawl.search();
+console.log(result.total, result.totalPages, result.items);
+
+// 법안명 필터 + 정렬
+const filtered = await palCrawl.search({
+  billName: '도로교통법',
+  sortCol: 'BILL_NAME',
+  sortGbn: 'ASC',
+  pageUnit: 20,
+});
+```
+
+### searchDone(query?: ISearchQuery) => Promise\<ISearchResult>
+
+`searchDone` 메서드는 종료된 입법 예고를 조건에 맞게 검색합니다. `fromAge`, `toAge`, `billNo` 필터를 추가로 지원합니다.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+
+// 22대 종료 입법예고만 조회
+const result = await palCrawl.searchDone({ fromAge: 22, toAge: 22 });
+console.log(result.total, result.items);
+```
+
+---
+
+### getPage(pageIndex: number, pageUnit?: number) => Promise\<ITableData[]>
+
+`getPage` 메서드는 진행 중인 입법 예고에서 특정 페이지의 항목을 가져옵니다.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+
+const page1 = await palCrawl.getPage(1); // 1페이지 (기본 10건)
+const page2 = await palCrawl.getPage(2, 20); // 2페이지, 20건씩
+```
+
+### getDonePage(pageIndex: number, pageUnit?: number) => Promise\<ITableData[]>
+
+`getDonePage` 메서드는 종료된 입법 예고에서 특정 페이지의 항목을 가져옵니다.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+const page3 = await palCrawl.getDonePage(3);
+```
+
+---
+
+### getAllPages(query?: ISearchQuery, options?: IBulkOptions) => AsyncGenerator\<ISearchResult>
+
+`getAllPages` 메서드는 진행 중인 입법 예고를 여러 페이지에 걸쳐 순차적으로 수집하는 비동기 제너레이터입니다. `for await...of` 루프로 한 페이지씩 처리할 수 있습니다.
+
+- `delayMs` (기본값: 500): 페이지 요청 사이의 지연 시간(ms). 서버 부하를 줄이기 위해 설정하세요.
+- `concurrency` (기본값: 1): 동시에 요청할 페이지 수.
+- `maxPages` (기본값: 전체 페이지): 수집할 최대 페이지 수.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+
+// 처음 5 페이지를 순서대로 수집
+for await (const page of palCrawl.getAllPages(
+  {},
+  { maxPages: 5, delayMs: 300 },
+)) {
+  console.log(
+    `페이지 ${page.currentPage}/${page.totalPages}: ${page.items.length}건`,
+  );
+  for (const item of page.items) {
+    console.log(item.subject);
+  }
+}
+```
+
+### getAllDonePages(query?: ISearchQuery, options?: IBulkOptions) => AsyncGenerator\<ISearchResult>
+
+`getAllDonePages`는 종료된 입법 예고에 대한 대량 수집 제너레이터입니다.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+
+// 22대 종료 입법예고 전체 수집 (concurrency=2, 지연 200ms)
+for await (const page of palCrawl.getAllDonePages(
+  { fromAge: 22, toAge: 22 },
+  { concurrency: 2, delayMs: 200 },
+)) {
+  console.log(`${page.currentPage}/${page.totalPages}: ${page.items.length}건`);
+}
+```
+
+---
+
 ## Examples
 
 ### 기본 사용법
@@ -315,6 +475,60 @@ if (first?.contentId) {
   console.log(content.proposalReason);
   console.log(content.billNumber);
   console.log(content.noticePeriod);
+}
+```
+
+### 검색 필터를 사용해 법안 조회하기
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+
+// 법안명 검색
+const result = await palCrawl.search({ billName: '도로교통법', pageUnit: 20 });
+console.log(`총 ${result.total}건 (${result.totalPages}페이지)`);
+result.items.forEach((item) => console.log(item.subject));
+
+// 22대 종료 입법예고에서 의안번호로 검색
+const done = await palCrawl.searchDone({
+  fromAge: 22,
+  toAge: 22,
+  billNo: '2218',
+});
+done.items.forEach((item) => console.log(item.subject));
+```
+
+### 대량 수집 (getAllPages / getAllDonePages)
+
+```typescript
+import { PalCrawl, type ITableData } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+const allItems: ITableData[] = [];
+
+// 진행 중인 입법예고 전체 페이지 수집 (500ms 지연)
+for await (const page of palCrawl.getAllPages({}, { delayMs: 500 })) {
+  allItems.push(...page.items);
+  console.log(`수집 중: ${page.currentPage}/${page.totalPages} 페이지`);
+}
+
+console.log(`전체 ${allItems.length}건 수집 완료`);
+```
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl();
+
+// 처음 10 페이지만, 동시 2개 요청으로 빠르게 수집
+for await (const page of palCrawl.getAllDonePages(
+  { sortCol: 'LGSLT_PA_RG_DT', sortGbn: 'DESC' },
+  { maxPages: 10, concurrency: 2, delayMs: 200 },
+)) {
+  console.log(
+    `페이지 ${page.currentPage}: ${page.items.map((i) => i.subject).join(', ')}`,
+  );
 }
 ```
 

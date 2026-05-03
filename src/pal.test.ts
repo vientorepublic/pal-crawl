@@ -1,4 +1,9 @@
-import { ITableData, PalCrawl, type PalCrawlConfig } from './pal';
+import {
+  ITableData,
+  ISearchResult,
+  PalCrawl,
+  type PalCrawlConfig,
+} from './pal';
 import { PalParser } from './parser';
 
 const FIXED_ONGOING_CONTENT_ID = 'PRC_W2W6V0D4D0B9C1B4B4Z6V2W0U7V2T9';
@@ -118,7 +123,36 @@ const CONTENT_HTML = `
 </div>
 `;
 
-// ─── PalParser ────────────────────────────────────────────────────────────────
+const SEARCH_RESULT_HTML = `
+<div class="board_count">
+  <span>전체</span>
+  <strong>143</strong>
+  <span>건 (2/15 페이지)</span>
+</div>
+<table>
+  <tbody>
+    <tr>
+      <td>42</td>
+      <td class="td_block">
+        <a href="/napal/lgsltpa/lgsltpaOngoing/view.do?lgsltPaId=PRC_TEST000" class="board_subject">테스트 법률안 (홍길동의원 등 5인)</a>
+      </td>
+      <td>의원</td>
+      <td>법제사법위원회</td>
+      <td></td>
+      <td>
+        <a href="#">버튼</a>
+        <a href="https://example.com/file.hwp">hwp</a>
+        <a href="https://example.com/file.pdf">pdf</a>
+      </td>
+      <td></td>
+      <td>1,234</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+`;
+
+// ─── PalParser ──────────────────────────────────────────────────────────────────────────────
 
 describe('PalParser', () => {
   const parser = new PalParser();
@@ -248,6 +282,31 @@ describe('PalParser', () => {
           </div>
         `),
       ).not.toThrow();
+    });
+  });
+  describe('parseSearchResult', () => {
+    test('parses total, totalPages, currentPage, and items from fixture', () => {
+      const result = parser.parseSearchResult(SEARCH_RESULT_HTML);
+      expect(result.total).toBe(143);
+      expect(result.totalPages).toBe(15);
+      expect(result.currentPage).toBe(2);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].subject).toBe('테스트 법률안 (홍길동의원 등 5인)');
+    });
+
+    test('returns zero total and empty items for empty html', () => {
+      const result = parser.parseSearchResult('');
+      expect(result.total).toBe(0);
+      expect(result.totalPages).toBe(0);
+      expect(result.currentPage).toBe(1);
+      expect(result.items).toHaveLength(0);
+    });
+
+    test('falls back to items.length when count structure is absent', () => {
+      const result = parser.parseSearchResult(TABLE_ROW_HTML);
+      expect(result.total).toBe(1);
+      expect(result.totalPages).toBe(1);
+      expect(result.currentPage).toBe(1);
     });
   });
 });
@@ -465,6 +524,173 @@ describe('PalCrawl', () => {
       await expect(palCrawl.getDoneContentHTML('   ')).rejects.toThrow(
         'id is required',
       );
+    });
+  });
+
+  // ── search / searchDone (integration) ─────────────────────────────────────────
+
+  describe('search / searchDone', () => {
+    test('search: returns ISearchResult with total, totalPages, currentPage', async () => {
+      const result = await palCrawl.search();
+      expect(result.total).toBeGreaterThan(0);
+      expect(result.totalPages).toBeGreaterThan(0);
+      expect(result.currentPage).toBe(1);
+      expect(result.items.length).toBeGreaterThan(0);
+    });
+
+    test('search: billName filter returns matching items', async () => {
+      const result = await palCrawl.search({ billName: '도로교통' });
+      expect(result.items.length).toBeGreaterThan(0);
+      result.items.forEach((item) => {
+        expect(item.subject).toMatch(/도로교통/);
+      });
+    });
+
+    test('search: sortCol=BILL_NAME sortGbn=ASC returns alphabetically sorted items', async () => {
+      const result = await palCrawl.search({
+        sortCol: 'BILL_NAME',
+        sortGbn: 'ASC',
+        pageUnit: 5,
+      });
+      expect(result.items.length).toBeGreaterThan(0);
+      // First subject should start alphabetically early (가ㅠ)
+      expect(result.items[0].subject).not.toContain('오류');
+    });
+
+    test('searchDone: returns ISearchResult with large total', async () => {
+      const result = await palCrawl.searchDone();
+      expect(result.total).toBeGreaterThan(1000);
+      expect(result.totalPages).toBeGreaterThan(100);
+      expect(result.currentPage).toBe(1);
+    });
+
+    test('searchDone: fromAge/toAge filter narrows results', async () => {
+      const result = await palCrawl.searchDone({
+        fromAge: 22,
+        toAge: 22,
+        pageUnit: 5,
+      });
+      // The site always reports the global total in the count area,
+      // but the returned items are filtered to the specified session range.
+      expect(result.items.length).toBeGreaterThan(0);
+      expect(result.items.length).toBeLessThanOrEqual(5);
+    });
+  });
+
+  // ── getPage / getDonePage (integration) ─────────────────────────────────────
+
+  describe('getPage / getDonePage', () => {
+    test('getPage(1): returns same items as get()', async () => {
+      const [page1, legacy] = await Promise.all([
+        palCrawl.getPage(1),
+        palCrawl.get(),
+      ]);
+      expect(page1).toHaveLength(legacy.length);
+      expect(page1[0].subject).toBe(legacy[0].subject);
+    });
+
+    test('getPage(2): returns different items from page 1', async () => {
+      const [page1, page2] = await Promise.all([
+        palCrawl.getPage(1),
+        palCrawl.getPage(2),
+      ]);
+      expect(page1.length).toBeGreaterThan(0);
+      expect(page2.length).toBeGreaterThan(0);
+      expect(page1[0].subject).not.toBe(page2[0].subject);
+    });
+
+    test('getPage: pageUnit=20 returns up to 20 items', async () => {
+      const items = await palCrawl.getPage(1, 20);
+      expect(items.length).toBeLessThanOrEqual(20);
+      expect(items.length).toBeGreaterThan(10);
+    });
+
+    test('getDonePage(2): returns items different from page 1', async () => {
+      const [page1, page2] = await Promise.all([
+        palCrawl.getDonePage(1),
+        palCrawl.getDonePage(2),
+      ]);
+      expect(page1[0].subject).not.toBe(page2[0].subject);
+    });
+  });
+
+  // ── getAllPages / getAllDonePages (integration) ──────────────────────────────
+
+  describe('getAllPages / getAllDonePages', () => {
+    test('getAllPages: yields exactly maxPages results', async () => {
+      const pages: ISearchResult[] = [];
+      for await (const page of palCrawl.getAllPages(
+        { pageUnit: 5 },
+        { maxPages: 2, delayMs: 0 },
+      )) {
+        pages.push(page);
+      }
+      expect(pages).toHaveLength(2);
+      expect(pages[0].items.length).toBeGreaterThan(0);
+      expect(pages[1].items.length).toBeGreaterThan(0);
+    });
+
+    test('getAllPages: currentPage increments correctly', async () => {
+      const pages: ISearchResult[] = [];
+      for await (const page of palCrawl.getAllPages(
+        { pageUnit: 5 },
+        { maxPages: 3, delayMs: 0 },
+      )) {
+        pages.push(page);
+      }
+      expect(pages[0].currentPage).toBe(1);
+      expect(pages[1].currentPage).toBe(2);
+      expect(pages[2].currentPage).toBe(3);
+    });
+
+    test('getAllPages: total and totalPages are consistent across pages', async () => {
+      const pages: ISearchResult[] = [];
+      for await (const page of palCrawl.getAllPages(
+        {},
+        { maxPages: 2, delayMs: 0 },
+      )) {
+        pages.push(page);
+      }
+      expect(pages[0].total).toBe(pages[1].total);
+      expect(pages[0].totalPages).toBe(pages[1].totalPages);
+    });
+
+    test('getAllPages: page 2 items differ from page 1', async () => {
+      const pages: ISearchResult[] = [];
+      for await (const page of palCrawl.getAllPages(
+        { pageUnit: 5 },
+        { maxPages: 2, delayMs: 0 },
+      )) {
+        pages.push(page);
+      }
+      expect(pages[0].items[0].subject).not.toBe(pages[1].items[0].subject);
+    });
+
+    test('getAllPages: concurrency > 1 yields pages in order', async () => {
+      const pages: ISearchResult[] = [];
+      for await (const page of palCrawl.getAllPages(
+        { pageUnit: 5 },
+        { maxPages: 4, delayMs: 0, concurrency: 2 },
+      )) {
+        pages.push(page);
+      }
+      expect(pages).toHaveLength(4);
+      for (let i = 0; i < pages.length; i++) {
+        expect(pages[i].currentPage).toBe(i + 1);
+      }
+    });
+
+    test('getAllDonePages: yields 2 pages of done notices', async () => {
+      const pages: ISearchResult[] = [];
+      for await (const page of palCrawl.getAllDonePages(
+        { pageUnit: 5 },
+        { maxPages: 2, delayMs: 0 },
+      )) {
+        pages.push(page);
+      }
+      expect(pages).toHaveLength(2);
+      expect(pages[0].total).toBeGreaterThan(1000);
+      expect(pages[0].items[0].subject).not.toBe(pages[1].items[0].subject);
     });
   });
 });
