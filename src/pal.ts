@@ -1,8 +1,19 @@
 import { URL } from 'url';
-import * as cheerio from 'cheerio';
-import type { AnyNode } from 'domhandler';
 import { Config } from './config';
 import { HttpClient } from './http-client';
+import {
+  PalParser,
+  type ITableData,
+  type IContentData,
+  type ISearchResult,
+} from './parser';
+
+export type {
+  IAttachment,
+  ITableData,
+  IContentData,
+  ISearchResult,
+} from './parser';
 
 export interface PalCrawlConfig {
   userAgent?: string;
@@ -11,36 +22,35 @@ export interface PalCrawlConfig {
   customHeaders?: Record<string, string>;
 }
 
-export interface IAttachment {
-  pdfFile: string | null;
-  hwpFile: string | null;
+export interface ISearchQuery {
+  pageIndex?: number;
+  pageUnit?: number;
+  committeeId?: string;
+  billName?: string;
+  represent?: string;
+  proposers?: string;
+  ppslRsonMnCn?: string;
+  sortCol?:
+    | 'BILL_NO'
+    | 'BILL_NAME'
+    | 'CURR_COMMITTEE'
+    | 'OPN_CNT'
+    | 'LGSLT_PA_RG_DT';
+  sortGbn?: 'DESC' | 'ASC';
+  fromAge?: number;
+  toAge?: number;
+  billNo?: string;
 }
 
-export interface ITableData {
-  num: number;
-  subject: string;
-  proposerCategory: string;
-  committee: string;
-  numComments: number;
-  link: string;
-  contentId: string | null;
-  attachments: IAttachment;
-}
-
-export interface IContentData {
-  title: string;
-  proposalReason: string | null;
-  billNumber: string | null;
-  proposer: string | null;
-  proposalDate: string | null;
-  committee: string | null;
-  referralDate: string | null;
-  noticePeriod: string | null;
-  proposalSession: string | null;
+export interface IBulkOptions {
+  delayMs?: number;
+  concurrency?: number;
+  maxPages?: number;
 }
 
 export class PalCrawl {
   private readonly httpClient: HttpClient;
+  private readonly parser: PalParser;
 
   constructor(config?: PalCrawlConfig) {
     this.httpClient = new HttpClient({
@@ -49,6 +59,31 @@ export class PalCrawl {
       retryCount: config?.retryCount ?? 3,
       customHeaders: config?.customHeaders ?? {},
     });
+    this.parser = new PalParser();
+  }
+
+  private buildListUrl(base: string, query: ISearchQuery): URL {
+    const url = new URL(base, Config.DOMAIN);
+    const entries: Array<[string, string | number | undefined]> = [
+      ['pageIndex', query.pageIndex],
+      ['pageUnit', query.pageUnit],
+      ['committeeId', query.committeeId],
+      ['billName', query.billName],
+      ['represent', query.represent],
+      ['proposers', query.proposers],
+      ['ppslRsonMnCn', query.ppslRsonMnCn],
+      ['sortCol', query.sortCol],
+      ['sortGbn', query.sortGbn],
+      ['fromAge', query.fromAge],
+      ['toAge', query.toAge],
+      ['billNo', query.billNo],
+    ];
+    for (const [key, value] of entries) {
+      if (value !== undefined && value !== null && value !== '') {
+        url.searchParams.set(key, String(value));
+      }
+    }
+    return url;
   }
 
   public async getPalHTML(): Promise<string> {
@@ -56,198 +91,17 @@ export class PalCrawl {
     return this.httpClient.get(url);
   }
 
-  private extractContentId(link: string): string | null {
-    try {
-      const url = new URL(link, Config.DOMAIN);
-      return (
-        url.searchParams.get('lgsltPaId') ?? url.searchParams.get('lgsltPaid')
-      );
-    } catch {
-      return null;
-    }
-  }
-
   public parseTable(html: string): ITableData[] {
-    const $ = cheerio.load(html);
-    const body = $('body');
-    const table = body.find('table > tbody > tr');
-    const output: ITableData[] = [];
-    table.map((_i, el) => {
-      const subject = $(el).find('td.td_block > a.board_subject').text().trim();
-      if (subject) {
-        const link = $(el).find('td.td_block > a.board_subject').attr('href');
-        const numComments = Number(
-          $(el).find('td:nth-child(8)').text().replace(',', '').trim(),
-        );
-        const proposerCategory = $(el).find('td:nth-child(3)').text().trim();
-        const committee = $(el).find('td:nth-child(4)').text().trim();
-        const num = Number($(el).find('td:nth-child(1)').text().trim());
-        let boardLink = '';
-        if (link) {
-          boardLink = Config.DOMAIN + link;
-        }
-        const pdfFile =
-          $(el).find('td:nth-child(6) > a:nth-child(3)').attr('href') ?? null;
-        const hwpFile =
-          $(el).find('td:nth-child(6) > a:nth-child(2)').attr('href') ?? null;
-        const attachments: IAttachment = {
-          pdfFile,
-          hwpFile,
-        };
-        const contentId = boardLink ? this.extractContentId(boardLink) : null;
-        output.push({
-          num,
-          subject,
-          proposerCategory,
-          committee,
-          numComments,
-          link: boardLink,
-          contentId,
-          attachments,
-        });
-      }
-    });
-    return output;
-  }
-
-  private normalizeText(text: string): string {
-    return text
-      .replace(/\u00a0/g, ' ')
-      .replace(/\r/g, '')
-      .split('\n')
-      .map((line) => line.replace(/\s+/g, ' ').trim())
-      .filter(Boolean)
-      .join('\n');
-  }
-
-  private extractTableCellText(
-    $: cheerio.CheerioAPI,
-    cell: cheerio.Cheerio<AnyNode>,
-  ): string {
-    const clonedCell = cell.clone();
-    clonedCell.find('.m_subject, script, style').remove();
-    clonedCell.find('a.btn_sm').remove();
-    return this.normalizeText($(clonedCell).text());
-  }
-
-  private parseBillInfoTable(
-    $: cheerio.CheerioAPI,
-  ): Pick<
-    IContentData,
-    | 'billNumber'
-    | 'proposer'
-    | 'proposalDate'
-    | 'committee'
-    | 'referralDate'
-    | 'noticePeriod'
-    | 'proposalSession'
-  > {
-    const table = $('.board-added table').first();
-    const row = table.find('tbody > tr').first();
-
-    if (!table.length || !row.length) {
-      return {
-        billNumber: null,
-        proposer: null,
-        proposalDate: null,
-        committee: null,
-        referralDate: null,
-        noticePeriod: null,
-        proposalSession: null,
-      };
-    }
-
-    const headers = table
-      .find('thead th')
-      .map((_, th) => this.normalizeText($(th).text()).replace(/\s+/g, ''))
-      .get();
-
-    const values = row
-      .children('td')
-      .map((_, td) => this.extractTableCellText($, $(td)))
-      .get();
-
-    const valueByHeader = new Map<string, string>();
-    headers.forEach((header, index) => {
-      const value = values[index];
-      if (value) {
-        valueByHeader.set(header, value);
-      }
-    });
-
-    return {
-      billNumber: valueByHeader.get('의안번호') ?? null,
-      proposer: valueByHeader.get('제안자') ?? null,
-      proposalDate: valueByHeader.get('제안일') ?? null,
-      committee: valueByHeader.get('소관위원회') ?? null,
-      referralDate: valueByHeader.get('회부일') ?? null,
-      noticePeriod: valueByHeader.get('입법예고기간') ?? null,
-      proposalSession: valueByHeader.get('제안회기') ?? null,
-    };
+    return this.parser.parseTable(html);
   }
 
   public parseContent(html: string): IContentData {
-    const $ = cheerio.load(html);
-
-    const title = this.normalizeText(
-      $('.legislation-heading h3').first().text() || $('h3').first().text(),
-    );
-
-    const sections: Record<string, string> = {};
-
-    $('.card-wrap .item').each((_, item) => {
-      const heading = this.normalizeText($(item).find('h4').first().text());
-      if (!heading) {
-        return;
-      }
-
-      const descText = this.normalizeText($(item).find('.desc').first().text());
-      if (!descText) {
-        sections[heading] = '';
-        return;
-      }
-
-      const normalizedHeading = heading.replace(/\s+/g, '');
-      const lines = descText.split('\n').filter(Boolean);
-      const firstLine = lines[0]?.replace(/\s+/g, '') ?? '';
-
-      // The first line sometimes repeats the section heading itself.
-      const content =
-        firstLine === normalizedHeading
-          ? this.normalizeText(lines.slice(1).join('\n'))
-          : descText;
-
-      sections[heading] = content;
-    });
-
-    const proposalReasonRaw =
-      Object.entries(sections).find(([heading]) =>
-        heading.replace(/\s+/g, '').includes('제안이유및주요내용'),
-      )?.[1] ?? null;
-
-    const proposalReason = proposalReasonRaw
-      ? this.normalizeText(proposalReasonRaw)
-      : null;
-
-    const billInfo = this.parseBillInfoTable($);
-
-    return {
-      title,
-      proposalReason,
-      billNumber: billInfo.billNumber,
-      proposer: billInfo.proposer,
-      proposalDate: billInfo.proposalDate,
-      committee: billInfo.committee,
-      referralDate: billInfo.referralDate,
-      noticePeriod: billInfo.noticePeriod,
-      proposalSession: billInfo.proposalSession,
-    };
+    return this.parser.parseContent(html);
   }
 
   public async get(): Promise<ITableData[]> {
     const html = await this.getPalHTML();
-    const table = this.parseTable(html);
-    return table;
+    return this.parser.parseTable(html);
   }
 
   public async getContentHTML(id: string): Promise<string> {
@@ -266,6 +120,142 @@ export class PalCrawl {
 
   public async getContent(id: string): Promise<IContentData> {
     const html = await this.getContentHTML(id);
-    return this.parseContent(html);
+    return this.parser.parseContent(html);
+  }
+
+  public async getDoneHTML(): Promise<string> {
+    const url = new URL(Config.DONE_LIST_URL, Config.DOMAIN);
+    return this.httpClient.get(url);
+  }
+
+  public async getDone(): Promise<ITableData[]> {
+    const html = await this.getDoneHTML();
+    return this.parser.parseTable(html);
+  }
+
+  public async getDoneContentHTML(id: string): Promise<string> {
+    const normalizedId = id.trim();
+    if (!normalizedId) {
+      throw new Error('id is required');
+    }
+
+    const url = new URL(Config.DONE_CONTENT_URL, Config.DOMAIN);
+    url.searchParams.set('lgsltPaid', normalizedId);
+    url.searchParams.set('lgsltPaId', normalizedId);
+
+    return this.httpClient.get(url);
+  }
+
+  public async getDoneContent(id: string): Promise<IContentData> {
+    const html = await this.getDoneContentHTML(id);
+    return this.parser.parseContent(html);
+  }
+
+  // ── Search / Filter ──────────────────────────────────────────────────────────
+
+  /** Fetch ongoing notices with optional filters and return parsed result with metadata. */
+  public async search(query: ISearchQuery = {}): Promise<ISearchResult> {
+    const url = this.buildListUrl(Config.LIST_URL, { pageIndex: 1, ...query });
+    const html = await this.httpClient.get(url);
+    return this.parser.parseSearchResult(html);
+  }
+
+  /** Fetch done notices with optional filters and return parsed result with metadata. */
+  public async searchDone(query: ISearchQuery = {}): Promise<ISearchResult> {
+    const url = this.buildListUrl(Config.DONE_LIST_URL, {
+      pageIndex: 1,
+      ...query,
+    });
+    const html = await this.httpClient.get(url);
+    return this.parser.parseSearchResult(html);
+  }
+
+  // ── Explicit page access ─────────────────────────────────────────────────────
+
+  /** Fetch a specific page of ongoing notices. */
+  public async getPage(
+    pageIndex: number,
+    pageUnit?: number,
+  ): Promise<ITableData[]> {
+    const result = await this.search({ pageIndex, pageUnit });
+    return result.items;
+  }
+
+  /** Fetch a specific page of done notices. */
+  public async getDonePage(
+    pageIndex: number,
+    pageUnit?: number,
+  ): Promise<ITableData[]> {
+    const result = await this.searchDone({ pageIndex, pageUnit });
+    return result.items;
+  }
+
+  // ── Bulk / pagination helpers ────────────────────────────────────────────────
+
+  private async *_getAllPagesImpl(
+    searchFn: (query: ISearchQuery) => Promise<ISearchResult>,
+    query: Omit<ISearchQuery, 'pageIndex'>,
+    options: IBulkOptions,
+  ): AsyncGenerator<ISearchResult> {
+    const delayMs = options.delayMs ?? 500;
+    const concurrency = Math.max(1, options.concurrency ?? 1);
+
+    const first = await searchFn({ ...query, pageIndex: 1 });
+    yield first;
+
+    if (first.totalPages <= 1 || first.items.length === 0) return;
+
+    const maxPages = Math.min(
+      first.totalPages,
+      options.maxPages ?? first.totalPages,
+    );
+
+    for (let start = 2; start <= maxPages; start += concurrency) {
+      if (delayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      }
+      const end = Math.min(start + concurrency - 1, maxPages);
+      const pageNums = Array.from(
+        { length: end - start + 1 },
+        (_, i) => start + i,
+      );
+      const results = await Promise.all(
+        pageNums.map((p) => searchFn({ ...query, pageIndex: p })),
+      );
+      for (const result of results) {
+        yield result;
+        if (result.items.length === 0) return;
+      }
+    }
+  }
+
+  /**
+   * Async generator that yields every page of ongoing notices.
+   * Respects `IBulkOptions` for rate-limiting and concurrency.
+   */
+  public getAllPages(
+    query?: Omit<ISearchQuery, 'pageIndex'>,
+    options?: IBulkOptions,
+  ): AsyncGenerator<ISearchResult> {
+    return this._getAllPagesImpl(
+      (q) => this.search(q),
+      query ?? {},
+      options ?? {},
+    );
+  }
+
+  /**
+   * Async generator that yields every page of done notices.
+   * Respects `IBulkOptions` for rate-limiting and concurrency.
+   */
+  public getAllDonePages(
+    query?: Omit<ISearchQuery, 'pageIndex'>,
+    options?: IBulkOptions,
+  ): AsyncGenerator<ISearchResult> {
+    return this._getAllPagesImpl(
+      (q) => this.searchDone(q),
+      query ?? {},
+      options ?? {},
+    );
   }
 }
