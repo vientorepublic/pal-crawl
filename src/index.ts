@@ -7,6 +7,7 @@ export {
   type ISearchQuery,
   type IBulkOptions,
   type PalCrawlConfig,
+  type ScreenshotOptions,
 } from './pal';
 export { PalParser } from './parser';
 export { Config } from './config';

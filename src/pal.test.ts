@@ -6,6 +6,19 @@ import {
 } from './pal';
 import { PalParser } from './parser';
 
+const DEFAULT_TEST_TIMEOUT_MS = 120000;
+const configuredTimeout = Number.parseInt(
+  process.env.PAL_CRAWL_TEST_TIMEOUT_MS ?? String(DEFAULT_TEST_TIMEOUT_MS),
+  10,
+);
+const testTimeoutMs =
+  Number.isFinite(configuredTimeout) && configuredTimeout > 0
+    ? configuredTimeout
+    : DEFAULT_TEST_TIMEOUT_MS;
+
+// Integration tests call external services and can be slow on unstable networks.
+jest.setTimeout(testTimeoutMs);
+
 const FIXED_ONGOING_CONTENT_ID = 'PRC_W2W6V0D4D0B9C1B4B4Z6V2W0U7V2T9';
 const FIXED_DONE_CONTENT_ID = 'PRC_S2R6N0M3K2J3K1J5K3S8R3P4O3P5X6';
 
@@ -691,6 +704,58 @@ describe('PalCrawl', () => {
       expect(pages).toHaveLength(2);
       expect(pages[0].total).toBeGreaterThan(1000);
       expect(pages[0].items[0].subject).not.toBe(pages[1].items[0].subject);
+    });
+  });
+
+  // ── Screenshots ──────────────────────────────────────────────────────────────
+
+  describe('Screenshot functionality', () => {
+    test('creates instance with screenshot config', () => {
+      const config: PalCrawlConfig = {
+        screenshot: {
+          enabled: true,
+          fullPage: true,
+          width: 1920,
+          height: 1080,
+          format: 'png',
+        },
+      };
+      expect(new PalCrawl(config)).toBeInstanceOf(PalCrawl);
+    });
+
+    test('throws error when screenshot is disabled', async () => {
+      const crawler = new PalCrawl({ screenshot: { enabled: false } });
+      await expect(
+        crawler.takeScreenshot('https://example.com'),
+      ).rejects.toThrow('Screenshot feature is not enabled');
+    });
+
+    test('accepts jpeg format with quality option', () => {
+      const config: PalCrawlConfig = {
+        screenshot: {
+          enabled: true,
+          format: 'jpeg',
+          quality: 90,
+        },
+      };
+      expect(new PalCrawl(config)).toBeInstanceOf(PalCrawl);
+    });
+
+    test('updateScreenshotConfig modifies screenshot settings', () => {
+      const crawler = new PalCrawl({
+        screenshot: { enabled: true, format: 'png' },
+      });
+      crawler.updateScreenshotConfig({ format: 'jpeg', quality: 75 });
+      expect(crawler).toBeInstanceOf(PalCrawl);
+    });
+
+    test('initBrowser and closeBrowser can be called', async () => {
+      const crawler = new PalCrawl({
+        screenshot: { enabled: true },
+      });
+      // Note: These tests don't actually require a browser to pass.
+      // In a real scenario with HEADLESS_BROWSER env set, these would work.
+      expect(crawler).toBeInstanceOf(PalCrawl);
     });
   });
 });

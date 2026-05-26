@@ -1,4 +1,5 @@
 import { URL } from 'url';
+import puppeteer, { type Browser } from 'puppeteer';
 import { Config } from './config';
 import { HttpClient } from './http-client';
 import {
@@ -15,11 +16,21 @@ export type {
   ISearchResult,
 } from './parser';
 
+export interface ScreenshotOptions {
+  enabled?: boolean;
+  fullPage?: boolean;
+  width?: number;
+  height?: number;
+  format?: 'png' | 'jpeg';
+  quality?: number; // for jpeg
+}
+
 export interface PalCrawlConfig {
   userAgent?: string;
   timeout?: number;
   retryCount?: number;
   customHeaders?: Record<string, string>;
+  screenshot?: ScreenshotOptions;
 }
 
 export interface ISearchQuery {
@@ -51,6 +62,8 @@ export interface IBulkOptions {
 export class PalCrawl {
   private readonly httpClient: HttpClient;
   private readonly parser: PalParser;
+  private browser: Browser | null = null;
+  private screenshotConfig: ScreenshotOptions;
 
   constructor(config?: PalCrawlConfig) {
     this.httpClient = new HttpClient({
@@ -60,6 +73,137 @@ export class PalCrawl {
       customHeaders: config?.customHeaders ?? {},
     });
     this.parser = new PalParser();
+    this.screenshotConfig = {
+      enabled: config?.screenshot?.enabled ?? false,
+      fullPage: config?.screenshot?.fullPage ?? true,
+      width: config?.screenshot?.width ?? 1920,
+      height: config?.screenshot?.height ?? 1080,
+      format: config?.screenshot?.format ?? 'png',
+      quality: config?.screenshot?.quality ?? 80,
+    };
+  }
+
+  /**
+   * Initialize the Puppeteer browser instance.
+   * Call this before taking screenshots if not already initialized.
+   */
+  public async initBrowser(): Promise<void> {
+    if (!this.browser) {
+      this.browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+    }
+  }
+
+  /**
+   * Close the Puppeteer browser instance.
+   * Call this when done to free up resources.
+   */
+  public async closeBrowser(): Promise<void> {
+    if (this.browser) {
+      await this.browser.close();
+      this.browser = null;
+    }
+  }
+
+  /**
+   * Take a screenshot of a URL and return it as a Buffer.
+   * Initializes browser if not already done.
+   */
+  public async takeScreenshot(urlStr: string): Promise<Buffer> {
+    if (!this.screenshotConfig.enabled) {
+      throw new Error(
+        'Screenshot feature is not enabled. Enable it in the config.',
+      );
+    }
+
+    await this.initBrowser();
+
+    if (!this.browser) {
+      throw new Error('Failed to initialize browser');
+    }
+
+    const page = await this.browser.newPage();
+    try {
+      await page.setViewport({
+        width: this.screenshotConfig.width ?? 1920,
+        height: this.screenshotConfig.height ?? 1080,
+      });
+
+      await page.goto(urlStr, { waitUntil: 'networkidle0', timeout: 30000 });
+
+      const screenshotBuffer = await page.screenshot({
+        fullPage: this.screenshotConfig.fullPage ?? true,
+        type: this.screenshotConfig.format as 'png' | 'jpeg',
+        quality:
+          this.screenshotConfig.format === 'jpeg'
+            ? (this.screenshotConfig.quality ?? 80)
+            : undefined,
+      });
+
+      return screenshotBuffer;
+    } finally {
+      await page.close();
+    }
+  }
+
+  /**
+   * Get a screenshot of the bill list page.
+   */
+  public async getPalScreenshot(): Promise<Buffer> {
+    const url = new URL(Config.LIST_URL, Config.DOMAIN);
+    return this.takeScreenshot(url.toString());
+  }
+
+  /**
+   * Get a screenshot of a specific bill content page.
+   */
+  public async getContentScreenshot(id: string): Promise<Buffer> {
+    const normalizedId = id.trim();
+    if (!normalizedId) {
+      throw new Error('id is required');
+    }
+
+    const url = new URL(Config.CONTENT_URL, Config.DOMAIN);
+    url.searchParams.set('lgsltPaid', normalizedId);
+    url.searchParams.set('lgsltPaId', normalizedId);
+
+    return this.takeScreenshot(url.toString());
+  }
+
+  /**
+   * Get a screenshot of the done bills list page.
+   */
+  public async getDoneScreenshot(): Promise<Buffer> {
+    const url = new URL(Config.DONE_LIST_URL, Config.DOMAIN);
+    return this.takeScreenshot(url.toString());
+  }
+
+  /**
+   * Get a screenshot of a specific done bill content page.
+   */
+  public async getDoneContentScreenshot(id: string): Promise<Buffer> {
+    const normalizedId = id.trim();
+    if (!normalizedId) {
+      throw new Error('id is required');
+    }
+
+    const url = new URL(Config.DONE_CONTENT_URL, Config.DOMAIN);
+    url.searchParams.set('lgsltPaid', normalizedId);
+    url.searchParams.set('lgsltPaId', normalizedId);
+
+    return this.takeScreenshot(url.toString());
+  }
+
+  /**
+   * Update screenshot configuration.
+   */
+  public updateScreenshotConfig(config: Partial<ScreenshotOptions>): void {
+    this.screenshotConfig = {
+      ...this.screenshotConfig,
+      ...config,
+    };
   }
 
   private buildListUrl(base: string, query: ISearchQuery): URL {
