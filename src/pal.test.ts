@@ -6,6 +6,19 @@ import {
 } from './pal';
 import { PalParser } from './parser';
 
+const DEFAULT_TEST_TIMEOUT_MS = 120000;
+const configuredTimeout = Number.parseInt(
+  process.env.PAL_CRAWL_TEST_TIMEOUT_MS ?? String(DEFAULT_TEST_TIMEOUT_MS),
+  10,
+);
+const testTimeoutMs =
+  Number.isFinite(configuredTimeout) && configuredTimeout > 0
+    ? configuredTimeout
+    : DEFAULT_TEST_TIMEOUT_MS;
+
+// Integration tests call external services and can be slow on unstable networks.
+jest.setTimeout(testTimeoutMs);
+
 const FIXED_ONGOING_CONTENT_ID = 'PRC_W2W6V0D4D0B9C1B4B4Z6V2W0U7V2T9';
 const FIXED_DONE_CONTENT_ID = 'PRC_S2R6N0M3K2J3K1J5K3S8R3P4O3P5X6';
 
