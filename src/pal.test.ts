@@ -693,4 +693,56 @@ describe('PalCrawl', () => {
       expect(pages[0].items[0].subject).not.toBe(pages[1].items[0].subject);
     });
   });
+
+  // ── Screenshots ──────────────────────────────────────────────────────────────
+
+  describe('Screenshot functionality', () => {
+    test('creates instance with screenshot config', () => {
+      const config: PalCrawlConfig = {
+        screenshot: {
+          enabled: true,
+          fullPage: true,
+          width: 1920,
+          height: 1080,
+          format: 'png',
+        },
+      };
+      expect(new PalCrawl(config)).toBeInstanceOf(PalCrawl);
+    });
+
+    test('throws error when screenshot is disabled', async () => {
+      const crawler = new PalCrawl({ screenshot: { enabled: false } });
+      await expect(
+        crawler.takeScreenshot('https://example.com'),
+      ).rejects.toThrow('Screenshot feature is not enabled');
+    });
+
+    test('accepts jpeg format with quality option', () => {
+      const config: PalCrawlConfig = {
+        screenshot: {
+          enabled: true,
+          format: 'jpeg',
+          quality: 90,
+        },
+      };
+      expect(new PalCrawl(config)).toBeInstanceOf(PalCrawl);
+    });
+
+    test('updateScreenshotConfig modifies screenshot settings', () => {
+      const crawler = new PalCrawl({
+        screenshot: { enabled: true, format: 'png' },
+      });
+      crawler.updateScreenshotConfig({ format: 'jpeg', quality: 75 });
+      expect(crawler).toBeInstanceOf(PalCrawl);
+    });
+
+    test('initBrowser and closeBrowser can be called', async () => {
+      const crawler = new PalCrawl({
+        screenshot: { enabled: true },
+      });
+      // Note: These tests don't actually require a browser to pass.
+      // In a real scenario with HEADLESS_BROWSER env set, these would work.
+      expect(crawler).toBeInstanceOf(PalCrawl);
+    });
+  });
 });

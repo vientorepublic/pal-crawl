@@ -36,7 +36,8 @@
   "homepage": "https://github.com/vientorepublic/pal-crawl#readme",
   "dependencies": {
     "cheerio": "^1.0.0",
-    "iconv-lite": "^0.7.2"
+    "iconv-lite": "^0.7.2",
+    "puppeteer": "^22.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

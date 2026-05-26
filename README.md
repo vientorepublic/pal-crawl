@@ -26,6 +26,7 @@
   - [getDone](#getdone--promiseitable-data)
   - [getDoneContentHTML](#getdonecontenthtmlid-string--promisestring)
   - [getDoneContent](#getdonecontentid-string--promiseicontentdata)
+  - [Screenshot APIs](#screenshot-apis)
   - [search / searchDone](#searchquery-isearchquery--promiseisearchresult)
   - [getPage / getDonePage](#getpagepageindex-number-pageunit-number--promiseitable-data)
   - [getAllPages / getAllDonePages](#getallpagesquery-isearchquery-options-ibulkoptions--asyncgeneratorisearchresult)
@@ -58,8 +59,20 @@ interface PalCrawlConfig {
   timeout?: number; // HTTP 요청 타임아웃 (밀리초, 기본값: 10000)
   retryCount?: number; // 재시도 횟수 (기본값: 3)
   customHeaders?: Record<string, string>; // 사용자 정의 헤더
+  screenshot?: ScreenshotOptions; // 헤드리스 크로뮴 스크린샷 옵션
+}
+
+interface ScreenshotOptions {
+  enabled?: boolean; // 스크린샷 기능 활성화 여부 (기본값: false)
+  fullPage?: boolean; // 전체 페이지 캡처 여부 (기본값: true)
+  width?: number; // 뷰포트 너비 (기본값: 1920)
+  height?: number; // 뷰포트 높이 (기본값: 1080)
+  format?: 'png' | 'jpeg'; // 이미지 포맷 (기본값: 'png')
+  quality?: number; // jpeg 품질 0~100 (기본값: 80)
 }
 ```
+
+스크린샷 기능은 기본적으로 비활성화되어 있으며, `screenshot.enabled: true`일 때만 동작합니다.
 
 ### 기본 사용법
 
@@ -283,6 +296,58 @@ console.log(content);
 //   proposer: '김기현의원 등 10인',
 //   ...
 // }
+```
+
+---
+
+### Screenshot APIs
+
+헤드리스 크로뮴(Puppeteer) 기반으로 웹페이지 스크린샷을 `Buffer`로 받을 수 있습니다.
+
+### initBrowser() => Promise\<void>
+
+브라우저 인스턴스를 미리 초기화합니다. 스크린샷 호출 시 자동 초기화되므로 선택적으로 사용하면 됩니다.
+
+### closeBrowser() => Promise\<void>
+
+열려 있는 브라우저 인스턴스를 종료합니다. 스크린샷 작업 후 호출을 권장합니다.
+
+### takeScreenshot(url: string) => Promise\<Buffer>
+
+임의 URL을 열어 스크린샷 이미지 버퍼를 반환합니다.
+
+### getPalScreenshot() => Promise\<Buffer>
+
+진행 중 입법예고 목록 페이지 스크린샷 버퍼를 반환합니다.
+
+### getContentScreenshot(id: string) => Promise\<Buffer>
+
+진행 중 입법예고 본문 페이지(의안 ID 기준) 스크린샷 버퍼를 반환합니다.
+
+### getDoneScreenshot() => Promise\<Buffer>
+
+종료된 입법예고 목록 페이지 스크린샷 버퍼를 반환합니다.
+
+### getDoneContentScreenshot(id: string) => Promise\<Buffer>
+
+종료된 입법예고 본문 페이지(의안 ID 기준) 스크린샷 버퍼를 반환합니다.
+
+### updateScreenshotConfig(config: Partial\<ScreenshotOptions>) => void
+
+런타임에 스크린샷 옵션을 변경합니다.
+
+```typescript
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl({
+  screenshot: {
+    enabled: true,
+    format: 'png',
+    fullPage: true,
+  },
+});
+
+palCrawl.updateScreenshotConfig({ format: 'jpeg', quality: 85 });
 ```
 
 ---
@@ -531,6 +596,37 @@ for await (const page of palCrawl.getAllDonePages(
   );
 }
 ```
+
+### 법률안 본문 스크린샷 버퍼 받기 (선택적 헤드리스 크로뮴)
+
+```typescript
+import fs from 'node:fs';
+import { PalCrawl } from 'pal-crawl';
+
+const palCrawl = new PalCrawl({
+  screenshot: {
+    enabled: true,
+    fullPage: true,
+    width: 1920,
+    height: 1080,
+    format: 'png',
+  },
+});
+
+try {
+  const table = await palCrawl.get();
+  const first = table.find((item) => item.contentId);
+
+  if (first?.contentId) {
+    const imageBuffer = await palCrawl.getContentScreenshot(first.contentId);
+    fs.writeFileSync('bill-content.png', imageBuffer);
+  }
+} finally {
+  await palCrawl.closeBrowser();
+}
+```
+
+`takeScreenshot`, `getPalScreenshot`, `getContentScreenshot`, `getDoneScreenshot`, `getDoneContentScreenshot`는 모두 `Buffer`를 반환합니다.
 
 ### 에러 처리
 
