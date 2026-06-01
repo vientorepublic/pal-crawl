@@ -257,7 +257,7 @@ const NSM_DETAIL_HTML = `
 </table>
 `;
 
-/** 상세 페이지 — 제안이유 없음 (pre 태그 없는 경우) */
+/** 상세 페이지 - 제안이유 없음 (pre 태그 없는 경우) */
 const NSM_DETAIL_HTML_NO_REASON = `
 <h2>최소 법률안</h2>
 <table>
@@ -332,7 +332,7 @@ describe('PalParser', () => {
 
     test('strips the repeated heading line from proposal reason', () => {
       const content = parser.parseContent(CONTENT_HTML);
-      // The desc starts with "제안이유 및 주요내용" which matches the heading — it must be stripped.
+      // The desc starts with "제안이유 및 주요내용" which matches the heading - it must be stripped.
       expect(content.proposalReason).not.toMatch(/제안이유/);
     });
 
