@@ -258,3 +258,260 @@ export class PalParser {
     };
   }
 }
+
+// ── 국민참여입법센터 국회입법현황 (opinion.lawmaking.go.kr) ───────────────────
+
+/** 의안원문 첨부 파일 정보 */
+export interface INsmAttachment {
+  filename: string;
+  /** fnDownload() 호출에 사용되는 파일 ID */
+  fileId: string;
+}
+
+/** 목록 페이지의 법안 한 건 */
+export interface INsmBillItem {
+  billName: string;
+  billNo: string;
+  link: string;
+  proposer: string;
+  proposalDate: string;
+  /** 상임위원회명 (위원회 회부 전이면 빈 문자열) */
+  committee: string;
+  /** 소관부처 */
+  ministry: string;
+  /** 국회현황 (예: "발의", "위원회 회부") */
+  progressStatus: string;
+  /** 추진일자 */
+  progressDate: string;
+  /** 의결현황 (예: "원안가결") */
+  resolutionStatus: string;
+  /** 의결일자 */
+  resolutionDate: string;
+}
+
+/** 상세 페이지의 법안 정보 */
+export interface INsmBillDetail {
+  title: string;
+  billNo: string;
+  /** 발의정보 원문 텍스트 */
+  proposalInfo: string;
+  proposer: string;
+  proposalDate: string;
+  /** 제안회기 (예: "제435회 국회(임시회)") */
+  session: string;
+  proposalReason: string | null;
+  attachments: INsmAttachment[];
+}
+
+/** 목록 검색 결과 */
+export interface INsmSearchResult {
+  total: number;
+  totalPages: number;
+  currentPage: number;
+  items: INsmBillItem[];
+}
+
+export class NsmLmStsParser {
+  private normalizeText(text: string): string {
+    return text
+      .replace(/\u00a0/g, ' ')
+      .replace(/\r/g, '')
+      .split('\n')
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  public parseList(html: string): INsmSearchResult {
+    const $ = cheerio.load(html);
+    const items: INsmBillItem[] = [];
+
+    $('table tbody tr').each((_, tr) => {
+      const $tr = $(tr);
+
+      const $billNameLink = $tr.find('td[data-th="의안명"]').find('a');
+      const billName = $billNameLink.text().trim();
+      if (!billName) return;
+
+      const href = $billNameLink.attr('href') ?? '';
+      const link = href ? Config.NSM_DOMAIN + href : '';
+      const billNoMatch = href.match(/\/(\d+)\/detailRP/);
+      const billNo = billNoMatch?.[1] ?? '';
+
+      const proposerPs = $tr
+        .find('td[data-th="제안자(제안일자)"]')
+        .find('p')
+        .map((_, p) => $(p).text().trim())
+        .get()
+        .filter(Boolean);
+      const proposer = proposerPs[0] ?? '';
+      const proposalDate = (proposerPs[1] ?? '').replace(/^\(|\)$/g, '').trim();
+
+      const committeePs = $tr
+        .find('td[data-th="상임위원회(소관부처)"]')
+        .find('p')
+        .map((_, p) => $(p).text().trim())
+        .get()
+        .filter(Boolean);
+      let committee = '';
+      let ministry = '';
+      for (const p of committeePs) {
+        if (p.startsWith('(') && p.endsWith(')')) {
+          ministry = p.slice(1, -1).trim();
+        } else {
+          committee = p;
+        }
+      }
+
+      const progressPs = $tr
+        .find('td[data-th="국회현황(추진일자)"]')
+        .find('p')
+        .map((_, p) => $(p).text().trim())
+        .get()
+        .filter(Boolean);
+      const progressStatus = progressPs[0] ?? '';
+      const progressDate = (progressPs[1] ?? '').replace(/^\(|\)$/g, '').trim();
+
+      const resolutionPs = $tr
+        .find('td[data-th="의결현황(의결일자)"]')
+        .find('p')
+        .map((_, p) => $(p).text().trim())
+        .get()
+        .filter(Boolean);
+      const resolutionStatus = resolutionPs[0] ?? '';
+      const resolutionDate = (resolutionPs[1] ?? '')
+        .replace(/^\(|\)$/g, '')
+        .trim();
+
+      items.push({
+        billName,
+        billNo,
+        link,
+        proposer,
+        proposalDate,
+        committee,
+        ministry,
+        progressStatus,
+        progressDate,
+        resolutionStatus,
+        resolutionDate,
+      });
+    });
+
+    let total = 0;
+    let currentPage = 1;
+    let totalPages = 0;
+
+    $('p.numBuild').each((_, el) => {
+      const $el = $(el);
+      const text = $el.text();
+      if (text.includes('건')) {
+        total = parseInt($el.find('span').text().replace(/,/g, ''), 10) || 0;
+      } else if (text.includes('쪽')) {
+        currentPage =
+          parseInt($el.find('em').text().replace(/,/g, ''), 10) || 1;
+        totalPages =
+          parseInt($el.find('span').text().replace(/,/g, ''), 10) || 0;
+      }
+    });
+
+    if (totalPages === 0 && items.length > 0) {
+      totalPages = 1;
+      total = total || items.length;
+    }
+
+    return { total, totalPages, currentPage, items };
+  }
+
+  public parseDetail(html: string): INsmBillDetail {
+    const $ = cheerio.load(html);
+
+    const title = $('h2')
+      .filter((_, el) => $(el).text().trim().length > 5)
+      .first()
+      .text()
+      .trim();
+
+    // 입법 기본정보 테이블 탐색
+    const $table = $('table')
+      .filter((_, el) => {
+        return (
+          $(el)
+            .find('th')
+            .filter((_, th) => /발의정보/.test($(th).text())).length > 0
+        );
+      })
+      .first();
+
+    const proposalInfo = this.normalizeText(
+      $table
+        .find('th')
+        .filter((_, th) => /발의정보/.test($(th).text()))
+        .closest('tr')
+        .find('td')
+        .text(),
+    );
+
+    // "홍길동의원 등 12인, 제2219088호(2026. 5. 29.). 제435회 국회(임시회)" 파싱
+    const billNoMatch = proposalInfo.match(/제(\d+)호/);
+    const billNo = billNoMatch?.[1] ?? '';
+
+    const proposalDateMatch = proposalInfo.match(/제\d+호\(([^)]+)\)/);
+    const proposalDate = proposalDateMatch?.[1]?.trim() ?? '';
+
+    const proposerMatch = proposalInfo.match(/^([^,]+),/);
+    const proposer = proposerMatch?.[1]?.trim() ?? '';
+
+    const sessionMatch = proposalInfo.match(/\.\s+(제\d+회\s*국회.*?)$/);
+    const session = sessionMatch?.[1]?.trim() ?? '';
+
+    // 의안원문 첨부파일
+    const $attachTd = $table
+      .find('th')
+      .filter((_, th) => /의안원문/.test($(th).text()))
+      .closest('tr')
+      .find('td');
+    const attachments: INsmAttachment[] = [];
+    $attachTd.find('button[onclick*="fnDownload"]').each((_, btn) => {
+      const onclick = $(btn).attr('onclick') ?? '';
+      const fileIdMatch = onclick.match(/fnDownload\((\d+)\)/);
+      if (fileIdMatch) {
+        const $btn = $(btn).clone();
+        $btn.find('span.a11y_hidden').remove();
+        const filename = $btn.text().trim();
+        attachments.push({ filename, fileId: fileIdMatch[1] });
+      }
+    });
+
+    // 제안이유 및 주요내용
+    const $reasonTd = $table
+      .find('th')
+      .filter((_, th) => /제안이유/.test($(th).text()))
+      .closest('tr')
+      .find('td');
+    let proposalReason: string | null = null;
+    if ($reasonTd.length) {
+      const $pre = $reasonTd.find('pre');
+      if ($pre.length) {
+        const clone = $pre.clone();
+        clone.find('br').replaceWith('\n');
+        const text = this.normalizeText(clone.text());
+        proposalReason = text || null;
+      } else {
+        const text = this.normalizeText($reasonTd.text());
+        proposalReason = text || null;
+      }
+    }
+
+    return {
+      title,
+      billNo,
+      proposalInfo,
+      proposer,
+      proposalDate,
+      session,
+      proposalReason,
+      attachments,
+    };
+  }
+}

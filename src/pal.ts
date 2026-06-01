@@ -4,9 +4,13 @@ import { Config } from './config';
 import { HttpClient } from './http-client';
 import {
   PalParser,
+  NsmLmStsParser,
   type ITableData,
   type IContentData,
   type ISearchResult,
+  type INsmBillItem,
+  type INsmBillDetail,
+  type INsmSearchResult,
 } from './parser';
 
 export type {
@@ -14,6 +18,10 @@ export type {
   ITableData,
   IContentData,
   ISearchResult,
+  INsmAttachment,
+  INsmBillItem,
+  INsmBillDetail,
+  INsmSearchResult,
 } from './parser';
 
 export interface ScreenshotOptions {
@@ -399,6 +407,263 @@ export class PalCrawl {
     return this._getAllPagesImpl(
       (q) => this.searchDone(q),
       query ?? {},
+      options ?? {},
+    );
+  }
+}
+
+// ── 국민참여입법센터 국회입법현황 ─────────────────────────────────────────────
+
+/**
+ * 국회현황 코드
+ * - 900101: 발의 (위원회 회부 이전 대기 상태 포함)
+ * - 900102: 위원회 회부
+ * - 900103: 위원회 상정
+ * - 900104: 위원회 법안소위
+ * - 900105: 위원회 전체회의
+ * - 900106: 법사위 심사
+ * - 900107: 본회의 심의
+ * - 900108: 정부이송
+ * - 900109: 공포
+ */
+export type NsmProgressStatus =
+  | '900101'
+  | '900102'
+  | '900103'
+  | '900104'
+  | '900105'
+  | '900106'
+  | '900107'
+  | '900108'
+  | '900109';
+
+/**
+ * 발의구분 코드
+ * - 900201: 정부
+ * - 900202: 의원
+ * - 900203: 위원장
+ */
+export type NsmProposerType = '900201' | '900202' | '900203';
+
+/**
+ * 의결현황 코드
+ * - 902911: 수정가결
+ * - 902912: 원안가결
+ * - 902913: 부결
+ * - 902914: 대안반영폐기
+ * - 902915: 폐기
+ * - 902916: 임기만료폐기
+ * - 902917: 철회
+ */
+export type NsmResolutionStatus =
+  | '902911'
+  | '902912'
+  | '902913'
+  | '902914'
+  | '902915'
+  | '902916'
+  | '902917';
+
+export interface INsmSearchQuery {
+  pageIndex?: number;
+  /** 페이지당 건수 (10 | 20 | 50 | 100) */
+  pageSize?: number;
+  /** 제안대수 시작 (예: "22" → 제22대) */
+  sugCd?: string;
+  /** 제안대수 끝 */
+  endSugCd?: string;
+  /** 발의구분 */
+  sgtCls?: NsmProposerType;
+  /** 소관부처 코드 */
+  cptOfiOrgCd?: string;
+  /** 국회현황 */
+  rslRsltNmL?: NsmProgressStatus;
+  /** 의결현황 */
+  rslRsltNmR?: NsmResolutionStatus;
+  /** 상임위 (예: "법제사법위원회") */
+  scCptPpostCmt?: string;
+  /** 제안일자 시작 (YYYY-MM-DD) */
+  searchStDtNew?: string;
+  /** 제안일자 종료 (YYYY-MM-DD) */
+  searchEdDtNew?: string;
+  /** 제안자 */
+  scPpsUsr?: string;
+  /** 규제 신설·강화 해당 여지 법안만 조회 */
+  issLawitmYn?: 'Y';
+  /** 추진일자 시작 (YYYY-MM-DD) */
+  stDt?: string;
+  /** 추진일자 종료 (YYYY-MM-DD) */
+  edDt?: string;
+  /** 의안번호 또는 의안명 */
+  scBlNmSct?: string;
+  sortCol?: string;
+  sortOrder?: 'DESC' | 'ASC';
+}
+
+export class NsmLmSts {
+  private readonly httpClient: HttpClient;
+  private readonly parser: NsmLmStsParser;
+
+  constructor(
+    config?: Pick<
+      PalCrawlConfig,
+      'userAgent' | 'timeout' | 'retryCount' | 'customHeaders'
+    >,
+  ) {
+    this.httpClient = new HttpClient({
+      userAgent: config?.userAgent ?? Config.UserAgent,
+      timeout: config?.timeout ?? 10000,
+      retryCount: config?.retryCount ?? 3,
+      customHeaders: config?.customHeaders ?? {},
+    });
+    this.parser = new NsmLmStsParser();
+  }
+
+  private buildListUrl(query: INsmSearchQuery): URL {
+    const url = new URL(Config.NSM_LIST_URL, Config.NSM_DOMAIN);
+    const entries: Array<[string, string | number | undefined]> = [
+      ['pageIndex', query.pageIndex],
+      ['pageSize', query.pageSize],
+      ['sugCd', query.sugCd],
+      ['endSugCd', query.endSugCd],
+      ['sgtCls', query.sgtCls],
+      ['cptOfiOrgCd', query.cptOfiOrgCd],
+      ['rslRsltNmL', query.rslRsltNmL],
+      ['rslRsltNmR', query.rslRsltNmR],
+      ['scCptPpostCmt', query.scCptPpostCmt],
+      ['searchStDtNew', query.searchStDtNew],
+      ['searchEdDtNew', query.searchEdDtNew],
+      ['scPpsUsr', query.scPpsUsr],
+      ['issLawitmYn', query.issLawitmYn],
+      ['stDt', query.stDt],
+      ['edDt', query.edDt],
+      ['sortCol', query.sortCol],
+      ['sortOrder', query.sortOrder],
+    ];
+    if (query.scBlNmSct) {
+      url.searchParams.set('scBlNm', 'scBlNm_blNm');
+      entries.push(['scBlNmSct', query.scBlNmSct]);
+    }
+    for (const [key, value] of entries) {
+      if (value !== undefined && value !== null && value !== '') {
+        url.searchParams.set(key, String(value));
+      }
+    }
+    return url;
+  }
+
+  /** 목록 페이지 HTML 반환 */
+  public async getListHTML(query: INsmSearchQuery = {}): Promise<string> {
+    const url = this.buildListUrl({ pageIndex: 1, ...query });
+    return this.httpClient.get(url);
+  }
+
+  public parseList(html: string): INsmSearchResult {
+    return this.parser.parseList(html);
+  }
+
+  public parseDetail(html: string): INsmBillDetail {
+    return this.parser.parseDetail(html);
+  }
+
+  /** 목록 검색 (필터 지원) */
+  public async search(query: INsmSearchQuery = {}): Promise<INsmSearchResult> {
+    const html = await this.getListHTML(query);
+    return this.parser.parseList(html);
+  }
+
+  /**
+   * 위원회 회부 이전 발의 상태인 법안만 조회 (rslRsltNmL=900101 고정).
+   * 소관부처·제안대수·날짜 등 나머지 필터는 그대로 적용됩니다.
+   */
+  public async searchPending(
+    query: Omit<INsmSearchQuery, 'rslRsltNmL'> = {},
+  ): Promise<INsmSearchResult> {
+    return this.search({ ...query, rslRsltNmL: '900101' });
+  }
+
+  /** 상세 페이지 HTML 반환 */
+  public async getDetailHTML(billNo: string): Promise<string> {
+    const normalized = billNo.trim();
+    if (!normalized) throw new Error('billNo is required');
+    const url = new URL(
+      `${Config.NSM_LIST_URL}/${normalized}/detailRP`,
+      Config.NSM_DOMAIN,
+    );
+    return this.httpClient.get(url);
+  }
+
+  /** 법안 상세 정보 조회 */
+  public async getDetail(billNo: string): Promise<INsmBillDetail> {
+    const html = await this.getDetailHTML(billNo);
+    return this.parser.parseDetail(html);
+  }
+
+  /** 특정 페이지의 법안 목록 조회 */
+  public async getPage(
+    pageIndex: number,
+    query: Omit<INsmSearchQuery, 'pageIndex'> = {},
+  ): Promise<INsmBillItem[]> {
+    const result = await this.search({ ...query, pageIndex });
+    return result.items;
+  }
+
+  private async *_getAllPagesImpl(
+    query: Omit<INsmSearchQuery, 'pageIndex'>,
+    options: IBulkOptions,
+  ): AsyncGenerator<INsmSearchResult> {
+    const delayMs = options.delayMs ?? 500;
+    const concurrency = Math.max(1, options.concurrency ?? 1);
+
+    const first = await this.search({ ...query, pageIndex: 1 });
+    yield first;
+
+    if (first.totalPages <= 1 || first.items.length === 0) return;
+
+    const maxPages = Math.min(
+      first.totalPages,
+      options.maxPages ?? first.totalPages,
+    );
+
+    for (let start = 2; start <= maxPages; start += concurrency) {
+      if (delayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      }
+      const end = Math.min(start + concurrency - 1, maxPages);
+      const pageNums = Array.from(
+        { length: end - start + 1 },
+        (_, i) => start + i,
+      );
+      const results = await Promise.all(
+        pageNums.map((p) => this.search({ ...query, pageIndex: p })),
+      );
+      for (const result of results) {
+        yield result;
+        if (result.items.length === 0) return;
+      }
+    }
+  }
+
+  /**
+   * 전체 페이지를 순차적으로 yield하는 async generator.
+   * `IBulkOptions`로 딜레이·동시성·최대 페이지를 조절할 수 있습니다.
+   */
+  public getAllPages(
+    query?: Omit<INsmSearchQuery, 'pageIndex'>,
+    options?: IBulkOptions,
+  ): AsyncGenerator<INsmSearchResult> {
+    return this._getAllPagesImpl(query ?? {}, options ?? {});
+  }
+
+  /**
+   * 발의 상태(위원회 회부 전) 법안 전체를 페이지 단위로 yield합니다.
+   */
+  public getAllPendingPages(
+    query?: Omit<INsmSearchQuery, 'pageIndex' | 'rslRsltNmL'>,
+    options?: IBulkOptions,
+  ): AsyncGenerator<INsmSearchResult> {
+    return this._getAllPagesImpl(
+      { ...query, rslRsltNmL: '900101' },
       options ?? {},
     );
   }
