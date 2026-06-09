@@ -39,6 +39,7 @@
   - [getDetail](#getdetailbillno-string--promiseinsmBilldetail)
   - [getAllPages (NsmLmSts)](#getallpagesquery-options--asyncgeneratorinsmsearchresult)
   - [getAllPendingPages](#getallpendingpagesquery-options--asyncgeneratorinsmsearchresult)
+  - [Screenshot (NsmLmSts)](#getnsmlisscreenshotquery--promisebuffer)
 - [Examples](#examples)
 - [License](#license)
 
@@ -729,6 +730,36 @@ for await (const page of nsm.getAllPendingPages({}, { delayMs: 500 })) {
   );
 }
 ```
+
+---
+
+### getNsmListScreenshot(query?) => Promise\<Buffer>
+
+국회입법현황 목록 페이지의 스크린샷을 `Buffer`로 반환합니다. `screenshot.enabled: true`로 초기화해야 합니다.
+
+### getDetailScreenshot(billNo: string) => Promise\<Buffer>
+
+법안 상세 페이지의 스크린샷을 `Buffer`로 반환합니다.
+
+```typescript
+import fs from 'node:fs';
+import { NsmLmSts } from 'pal-crawl';
+
+const nsm = new NsmLmSts({ screenshot: { enabled: true, fullPage: true } });
+
+try {
+  const items = await nsm.getPage(1);
+  const listBuf = await nsm.getNsmListScreenshot();
+  fs.writeFileSync('nsm-list.png', listBuf);
+
+  const detailBuf = await nsm.getDetailScreenshot(items[0].billNo);
+  fs.writeFileSync('nsm-detail.png', detailBuf);
+} finally {
+  await nsm.closeBrowser();
+}
+```
+
+> `takeScreenshot(url)`, `initBrowser()`, `closeBrowser()`, `updateScreenshotConfig()` 메서드는 `PalCrawl`과 공유되는 `ScreenshotBase`에서 상속됩니다.
 
 ---
 

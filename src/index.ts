@@ -1,4 +1,5 @@
 export {
+  ScreenshotBase,
   PalCrawl,
   NsmLmSts,
   type ITableData,

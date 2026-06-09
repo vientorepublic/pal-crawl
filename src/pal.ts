@@ -67,34 +67,26 @@ export interface IBulkOptions {
   maxPages?: number;
 }
 
-export class PalCrawl {
-  private readonly httpClient: HttpClient;
-  private readonly parser: PalParser;
+/**
+ * Puppeteer 기반 스크린샷 기능을 공유하는 베이스 클래스.
+ * `PalCrawl`과 `NsmLmSts` 양쪽에서 상속합니다.
+ */
+export abstract class ScreenshotBase {
   private browser: Browser | null = null;
-  private screenshotConfig: ScreenshotOptions;
+  protected screenshotConfig: ScreenshotOptions;
 
-  constructor(config?: PalCrawlConfig) {
-    this.httpClient = new HttpClient({
-      userAgent: config?.userAgent ?? Config.UserAgent,
-      timeout: config?.timeout ?? 10000,
-      retryCount: config?.retryCount ?? 3,
-      customHeaders: config?.customHeaders ?? {},
-    });
-    this.parser = new PalParser();
+  protected constructor(screenshot?: ScreenshotOptions) {
     this.screenshotConfig = {
-      enabled: config?.screenshot?.enabled ?? false,
-      fullPage: config?.screenshot?.fullPage ?? true,
-      width: config?.screenshot?.width ?? 1920,
-      height: config?.screenshot?.height ?? 1080,
-      format: config?.screenshot?.format ?? 'png',
-      quality: config?.screenshot?.quality ?? 80,
+      enabled: screenshot?.enabled ?? false,
+      fullPage: screenshot?.fullPage ?? true,
+      width: screenshot?.width ?? 1920,
+      height: screenshot?.height ?? 1080,
+      format: screenshot?.format ?? 'png',
+      quality: screenshot?.quality ?? 80,
     };
   }
 
-  /**
-   * Initialize the Puppeteer browser instance.
-   * Call this before taking screenshots if not already initialized.
-   */
+  /** Puppeteer 브라우저 인스턴스를 초기화합니다. */
   public async initBrowser(): Promise<void> {
     if (!this.browser) {
       this.browser = await puppeteer.launch({
@@ -104,10 +96,7 @@ export class PalCrawl {
     }
   }
 
-  /**
-   * Close the Puppeteer browser instance.
-   * Call this when done to free up resources.
-   */
+  /** Puppeteer 브라우저 인스턴스를 종료하고 리소스를 해제합니다. */
   public async closeBrowser(): Promise<void> {
     if (this.browser) {
       await this.browser.close();
@@ -115,10 +104,7 @@ export class PalCrawl {
     }
   }
 
-  /**
-   * Take a screenshot of a URL and return it as a Buffer.
-   * Initializes browser if not already done.
-   */
+  /** 주어진 URL의 스크린샷을 Buffer로 반환합니다. */
   public async takeScreenshot(urlStr: string): Promise<Buffer> {
     if (!this.screenshotConfig.enabled) {
       throw new Error(
@@ -154,6 +140,30 @@ export class PalCrawl {
     } finally {
       await page.close();
     }
+  }
+
+  /** 스크린샷 설정을 업데이트합니다. */
+  public updateScreenshotConfig(config: Partial<ScreenshotOptions>): void {
+    this.screenshotConfig = {
+      ...this.screenshotConfig,
+      ...config,
+    };
+  }
+}
+
+export class PalCrawl extends ScreenshotBase {
+  private readonly httpClient: HttpClient;
+  private readonly parser: PalParser;
+
+  constructor(config?: PalCrawlConfig) {
+    super(config?.screenshot);
+    this.httpClient = new HttpClient({
+      userAgent: config?.userAgent ?? Config.UserAgent,
+      timeout: config?.timeout ?? 10000,
+      retryCount: config?.retryCount ?? 3,
+      customHeaders: config?.customHeaders ?? {},
+    });
+    this.parser = new PalParser();
   }
 
   /**
@@ -202,16 +212,6 @@ export class PalCrawl {
     url.searchParams.set('lgsltPaId', normalizedId);
 
     return this.takeScreenshot(url.toString());
-  }
-
-  /**
-   * Update screenshot configuration.
-   */
-  public updateScreenshotConfig(config: Partial<ScreenshotOptions>): void {
-    this.screenshotConfig = {
-      ...this.screenshotConfig,
-      ...config,
-    };
   }
 
   private buildListUrl(base: string, query: ISearchQuery): URL {
@@ -500,16 +500,12 @@ export interface INsmSearchQuery {
   sortOrder?: 'DESC' | 'ASC';
 }
 
-export class NsmLmSts {
+export class NsmLmSts extends ScreenshotBase {
   private readonly httpClient: HttpClient;
   private readonly parser: NsmLmStsParser;
 
-  constructor(
-    config?: Pick<
-      PalCrawlConfig,
-      'userAgent' | 'timeout' | 'retryCount' | 'customHeaders'
-    >,
-  ) {
+  constructor(config?: PalCrawlConfig) {
+    super(config?.screenshot);
     this.httpClient = new HttpClient({
       userAgent: config?.userAgent ?? Config.UserAgent,
       timeout: config?.timeout ?? 10000,
@@ -666,5 +662,24 @@ export class NsmLmSts {
       { ...query, rslRsltNmL: '900101' },
       options ?? {},
     );
+  }
+
+  /** 국회입법현황 목록 페이지 스크린샷 */
+  public async getNsmListScreenshot(
+    query: Omit<INsmSearchQuery, 'pageIndex'> = {},
+  ): Promise<Buffer> {
+    const url = this.buildListUrl({ pageIndex: 1, ...query });
+    return this.takeScreenshot(url.toString());
+  }
+
+  /** 법안 상세 페이지 스크린샷 */
+  public async getDetailScreenshot(billNo: string): Promise<Buffer> {
+    const normalized = billNo.trim();
+    if (!normalized) throw new Error('billNo is required');
+    const url = new URL(
+      `${Config.NSM_LIST_URL}/${normalized}/detailRP`,
+      Config.NSM_DOMAIN,
+    );
+    return this.takeScreenshot(url.toString());
   }
 }
