@@ -30,6 +30,16 @@
   - [search / searchDone](#searchquery-isearchquery--promiseisearchresult)
   - [getPage / getDonePage](#getpagepageindex-number-pageunit-number--promiseitable-data)
   - [getAllPages / getAllDonePages](#getallpagesquery-isearchquery-options-ibulkoptions--asyncgeneratorisearchresult)
+- [NsmLmSts - 국민참여입법센터 국회입법현황](#nsmlmsts--국민참여입법센터-국회입법현황)
+  - [NsmLmSts Configuration](#nsmlmsts-configuration)
+  - [NsmLmSts Types](#nsmlmsts-types)
+  - [search (NsmLmSts)](#searchquery-insmsearchquery--promiseinsmsearchresult)
+  - [searchPending](#searchpendingquery--promiseinsmsearchresult)
+  - [getPage (NsmLmSts)](#getpagepageindex-number-query--promiseinsmBillitem)
+  - [getDetail](#getdetailbillno-string--promiseinsmBilldetail)
+  - [getAllPages (NsmLmSts)](#getallpagesquery-options--asyncgeneratorinsmsearchresult)
+  - [getAllPendingPages](#getallpendingpagesquery-options--asyncgeneratorinsmsearchresult)
+  - [Screenshot (NsmLmSts)](#getnsmlisscreenshotquery--promisebuffer)
 - [Examples](#examples)
 - [License](#license)
 
@@ -38,6 +48,8 @@
 ## Introduction
 
 국회입법예고(pal.assembly.go.kr) 사이트에서 진행 중인 입법 예고 데이터를 크롤링하는 도구입니다. 입법 예고의 주요 정보를 손쉽게 가져올 수 있습니다.
+
+국민참여입법센터 국회입법현황(opinion.lawmaking.go.kr)에서 법안을 크롤링하는 `NsmLmSts` 클래스도 포함되어 있습니다. 위원회 회부 이전에 발의된 상태로 대기 중인 법안까지 조회할 수 있습니다.
 
 ---
 
@@ -463,6 +475,294 @@ for await (const page of palCrawl.getAllDonePages(
 
 ---
 
+## NsmLmSts - 국민참여입법센터 국회입법현황
+
+`NsmLmSts` 클래스는 [국민참여입법센터 국회입법현황](https://opinion.lawmaking.go.kr/gcom/nsmLmSts/out)에서 법안 목록과 상세 정보를 크롤링합니다. 위원회 회부 이전 발의 상태 법안까지 필터링할 수 있는 것이 특징입니다.
+
+---
+
+### NsmLmSts Configuration
+
+`NsmLmSts` 생성자는 `PalCrawl`과 동일한 네트워크 설정 옵션을 받습니다 (스크린샷 제외).
+
+```typescript
+const nsm = new NsmLmSts({
+  userAgent: 'My Bot 1.0',
+  timeout: 15000,
+  retryCount: 3,
+  customHeaders: { 'Accept-Language': 'ko-KR' },
+});
+```
+
+---
+
+### NsmLmSts Types
+
+`INsmSearchQuery`는 목록 검색 필터 옵션입니다.
+
+```typescript
+interface INsmSearchQuery {
+  pageIndex?: number; // 페이지 번호 (기본값: 1)
+  pageSize?: number; // 페이지당 건수 (10 | 20 | 50 | 100)
+  sugCd?: string; // 제안대수 시작 (예: "22" → 제22대)
+  endSugCd?: string; // 제안대수 끝
+  sgtCls?: NsmProposerType; // 발의구분
+  cptOfiOrgCd?: string; // 소관부처 코드
+  rslRsltNmL?: NsmProgressStatus; // 국회현황 코드
+  rslRsltNmR?: NsmResolutionStatus; // 의결현황 코드
+  scCptPpostCmt?: string; // 상임위 (예: "법제사법위원회")
+  searchStDtNew?: string; // 제안일자 시작 (YYYY-MM-DD)
+  searchEdDtNew?: string; // 제안일자 종료 (YYYY-MM-DD)
+  scPpsUsr?: string; // 제안자
+  issLawitmYn?: 'Y'; // 규제 신설·강화 해당 법안만
+  stDt?: string; // 추진일자 시작 (YYYY-MM-DD)
+  edDt?: string; // 추진일자 종료 (YYYY-MM-DD)
+  scBlNmSct?: string; // 의안번호 또는 의안명
+  sortCol?: string;
+  sortOrder?: 'DESC' | 'ASC';
+}
+```
+
+`NsmProgressStatus`는 국회현황 필터 코드입니다.
+
+| 코드       | 의미                                   |
+| ---------- | -------------------------------------- |
+| `'900101'` | 발의 (위원회 회부 이전 대기 상태 포함) |
+| `'900102'` | 위원회 회부                            |
+| `'900103'` | 위원회 상정                            |
+| `'900104'` | 위원회 법안소위                        |
+| `'900105'` | 위원회 전체회의                        |
+| `'900106'` | 법사위 심사                            |
+| `'900107'` | 본회의 심의                            |
+| `'900108'` | 정부이송                               |
+| `'900109'` | 공포                                   |
+
+`NsmProposerType`은 발의구분 코드입니다.
+
+| 코드       | 의미   |
+| ---------- | ------ |
+| `'900201'` | 정부   |
+| `'900202'` | 의원   |
+| `'900203'` | 위원장 |
+
+`NsmResolutionStatus`는 의결현황 코드입니다.
+
+| 코드       | 의미         |
+| ---------- | ------------ |
+| `'902911'` | 수정가결     |
+| `'902912'` | 원안가결     |
+| `'902913'` | 부결         |
+| `'902914'` | 대안반영폐기 |
+| `'902915'` | 폐기         |
+| `'902916'` | 임기만료폐기 |
+| `'902917'` | 철회         |
+
+`INsmBillItem`은 목록 페이지의 법안 한 건입니다.
+
+```typescript
+interface INsmBillItem {
+  billName: string; // 법안명
+  billNo: string; // 의안번호
+  link: string; // 상세 페이지 링크
+  proposer: string; // 제안자
+  proposalDate: string; // 제안일
+  committee: string; // 상임위원회 (회부 전이면 빈 문자열)
+  ministry: string; // 소관부처
+  progressStatus: string; // 국회현황 (예: "발의", "위원회 회부")
+  progressDate: string; // 추진일자
+  resolutionStatus: string; // 의결현황 (예: "원안가결")
+  resolutionDate: string; // 의결일자
+}
+```
+
+`INsmBillDetail`은 상세 페이지의 법안 정보입니다.
+
+```typescript
+interface INsmBillDetail {
+  title: string; // 법안명
+  billNo: string; // 의안번호
+  proposalInfo: string; // 발의정보 원문 텍스트
+  proposer: string; // 제안자
+  proposalDate: string; // 제안일
+  session: string; // 제안회기 (예: "제435회 국회(임시회)")
+  proposalReason: string | null; // 제안이유 및 주요내용
+  attachments: INsmAttachment[]; // 의안원문 첨부파일 목록
+}
+```
+
+`INsmAttachment`는 첨부파일 정보입니다.
+
+```typescript
+interface INsmAttachment {
+  filename: string; // 파일명
+  fileId: string; // fnDownload() 호출에 사용되는 파일 ID
+}
+```
+
+`INsmSearchResult`는 목록 검색 결과입니다.
+
+```typescript
+interface INsmSearchResult {
+  total: number;
+  totalPages: number;
+  currentPage: number;
+  items: INsmBillItem[];
+}
+```
+
+---
+
+### search(query?: INsmSearchQuery) => Promise\<INsmSearchResult>
+
+법안 목록을 검색합니다. 필터를 지정하지 않으면 최신 법안 1페이지를 반환합니다.
+
+```typescript
+import { NsmLmSts } from 'pal-crawl';
+
+const nsm = new NsmLmSts();
+
+// 기본 조회
+const result = await nsm.search();
+console.log(result.total, result.items);
+
+// 제22대 의원발의 법안 조회
+const filtered = await nsm.search({
+  sugCd: '22',
+  endSugCd: '22',
+  sgtCls: '900202',
+  pageSize: 20,
+});
+```
+
+---
+
+### searchPending(query?) => Promise\<INsmSearchResult>
+
+위원회 회부 이전 발의 상태(`rslRsltNmL: '900101'`)로 고정하여 조회합니다. 대기 중인 법안만 가져오고 싶을 때 사용합니다.
+
+```typescript
+import { NsmLmSts } from 'pal-crawl';
+
+const nsm = new NsmLmSts();
+
+// 현재 발의 상태로 대기 중인 법안 조회
+const pending = await nsm.searchPending();
+console.log(`발의 대기 중: ${pending.total}건`);
+pending.items.forEach((item) => console.log(item.billName));
+```
+
+---
+
+### getPage(pageIndex: number, query?) => Promise\<INsmBillItem[]>
+
+특정 페이지의 법안 목록만 배열로 반환합니다.
+
+```typescript
+import { NsmLmSts } from 'pal-crawl';
+
+const nsm = new NsmLmSts();
+const page2 = await nsm.getPage(2, { pageSize: 20 });
+```
+
+---
+
+### getDetailHTML(billNo: string) => Promise\<string>
+
+법안 상세 페이지의 HTML 원문을 반환합니다.
+
+### getDetail(billNo: string) => Promise\<INsmBillDetail>
+
+의안번호로 법안 상세 정보를 조회합니다.
+
+```typescript
+import { NsmLmSts } from 'pal-crawl';
+
+const nsm = new NsmLmSts();
+const items = await nsm.getPage(1);
+const detail = await nsm.getDetail(items[0].billNo);
+
+console.log(detail.title);
+console.log(detail.proposer);
+console.log(detail.proposalDate);
+console.log(detail.session);
+console.log(detail.proposalReason);
+console.log(detail.attachments);
+// [{ filename: '법안.hwp', fileId: '99001' }, ...]
+```
+
+---
+
+### getAllPages(query?, options?) => AsyncGenerator\<INsmSearchResult>
+
+전체 페이지를 순차적으로 yield하는 async generator입니다. `IBulkOptions`로 딜레이·동시성·최대 페이지를 조절할 수 있습니다.
+
+```typescript
+import { NsmLmSts } from 'pal-crawl';
+
+const nsm = new NsmLmSts();
+
+for await (const page of nsm.getAllPages(
+  { pageSize: 20 },
+  { maxPages: 5, delayMs: 300 },
+)) {
+  console.log(
+    `페이지 ${page.currentPage}/${page.totalPages}: ${page.items.length}건`,
+  );
+}
+```
+
+---
+
+### getAllPendingPages(query?, options?) => AsyncGenerator\<INsmSearchResult>
+
+발의 상태(`rslRsltNmL: '900101'`) 법안 전체를 페이지 단위로 yield합니다.
+
+```typescript
+import { NsmLmSts } from 'pal-crawl';
+
+const nsm = new NsmLmSts();
+const pendingItems = [];
+
+for await (const page of nsm.getAllPendingPages({}, { delayMs: 500 })) {
+  pendingItems.push(...page.items);
+  console.log(
+    `${page.currentPage}/${page.totalPages}: 누적 ${pendingItems.length}건`,
+  );
+}
+```
+
+---
+
+### getNsmListScreenshot(query?) => Promise\<Buffer>
+
+국회입법현황 목록 페이지의 스크린샷을 `Buffer`로 반환합니다. `screenshot.enabled: true`로 초기화해야 합니다.
+
+### getDetailScreenshot(billNo: string) => Promise\<Buffer>
+
+법안 상세 페이지의 스크린샷을 `Buffer`로 반환합니다.
+
+```typescript
+import fs from 'node:fs';
+import { NsmLmSts } from 'pal-crawl';
+
+const nsm = new NsmLmSts({ screenshot: { enabled: true, fullPage: true } });
+
+try {
+  const items = await nsm.getPage(1);
+  const listBuf = await nsm.getNsmListScreenshot();
+  fs.writeFileSync('nsm-list.png', listBuf);
+
+  const detailBuf = await nsm.getDetailScreenshot(items[0].billNo);
+  fs.writeFileSync('nsm-detail.png', detailBuf);
+} finally {
+  await nsm.closeBrowser();
+}
+```
+
+> `takeScreenshot(url)`, `initBrowser()`, `closeBrowser()`, `updateScreenshotConfig()` 메서드는 `PalCrawl`과 공유되는 `ScreenshotBase`에서 상속됩니다.
+
+---
+
 ## Examples
 
 ### 기본 사용법
@@ -627,6 +927,67 @@ try {
 ```
 
 `takeScreenshot`, `getPalScreenshot`, `getContentScreenshot`, `getDoneScreenshot`, `getDoneContentScreenshot`는 모두 `Buffer`를 반환합니다.
+
+### 국민참여입법센터에서 발의 대기 중인 법안 전체 수집
+
+```typescript
+import { NsmLmSts, type INsmBillItem } from 'pal-crawl';
+
+const nsm = new NsmLmSts();
+const pendingItems: INsmBillItem[] = [];
+
+for await (const page of nsm.getAllPendingPages({}, { delayMs: 500 })) {
+  pendingItems.push(...page.items);
+  console.log(
+    `수집 중: ${page.currentPage}/${page.totalPages} 페이지 (누적 ${pendingItems.length}건)`,
+  );
+}
+
+console.log(`발의 대기 중 법안 ${pendingItems.length}건 수집 완료`);
+```
+
+### 국민참여입법센터에서 법안 상세 정보 조회
+
+```typescript
+import { NsmLmSts } from 'pal-crawl';
+
+const nsm = new NsmLmSts();
+
+// 1페이지 목록에서 첫 번째 법안 상세 조회
+const items = await nsm.getPage(1);
+if (items.length > 0) {
+  const detail = await nsm.getDetail(items[0].billNo);
+  console.log(detail.title);
+  console.log(detail.proposer);
+  console.log(detail.proposalDate);
+  console.log(detail.session);
+  console.log(detail.proposalReason);
+  // 첨부파일 목록
+  detail.attachments.forEach((att) => {
+    console.log(`${att.filename} (ID: ${att.fileId})`);
+  });
+}
+```
+
+### 국민참여입법센터 조건부 검색 (제22대 의원발의 법안)
+
+```typescript
+import { NsmLmSts } from 'pal-crawl';
+
+const nsm = new NsmLmSts();
+
+const result = await nsm.search({
+  sugCd: '22',
+  endSugCd: '22',
+  sgtCls: '900202', // 의원발의
+  pageSize: 50,
+});
+
+console.log(`제22대 의원발의 법안: ${result.total}건`);
+result.items.forEach((item) => {
+  console.log(`[${item.progressStatus}] ${item.billName} (${item.proposer})`);
+});
+```
 
 ### 에러 처리
 
