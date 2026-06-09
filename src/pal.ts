@@ -166,17 +166,13 @@ export class PalCrawl extends ScreenshotBase {
     this.parser = new PalParser();
   }
 
-  /**
-   * Get a screenshot of the bill list page.
-   */
+  /** 진행 중인 입법예고 목록 페이지 스크린샷을 반환합니다. */
   public async getPalScreenshot(): Promise<Buffer> {
     const url = new URL(Config.LIST_URL, Config.DOMAIN);
     return this.takeScreenshot(url.toString());
   }
 
-  /**
-   * Get a screenshot of a specific bill content page.
-   */
+  /** 진행 중인 입법예고의 특정 법률안 상세 페이지 스크린샷을 반환합니다. */
   public async getContentScreenshot(id: string): Promise<Buffer> {
     const normalizedId = id.trim();
     if (!normalizedId) {
@@ -190,17 +186,13 @@ export class PalCrawl extends ScreenshotBase {
     return this.takeScreenshot(url.toString());
   }
 
-  /**
-   * Get a screenshot of the done bills list page.
-   */
+  /** 완료된 입법예고 목록 페이지 스크린샷을 반환합니다. */
   public async getDoneScreenshot(): Promise<Buffer> {
     const url = new URL(Config.DONE_LIST_URL, Config.DOMAIN);
     return this.takeScreenshot(url.toString());
   }
 
-  /**
-   * Get a screenshot of a specific done bill content page.
-   */
+  /** 완료된 입법예고의 특정 법률안 상세 페이지 스크린샷을 반환합니다. */
   public async getDoneContentScreenshot(id: string): Promise<Buffer> {
     const normalizedId = id.trim();
     if (!normalizedId) {
@@ -238,24 +230,29 @@ export class PalCrawl extends ScreenshotBase {
     return url;
   }
 
+  /** 진행 중인 입법예고 목록 페이지의 HTML을 반환합니다. */
   public async getPalHTML(): Promise<string> {
     const url = new URL(Config.LIST_URL, Config.DOMAIN);
     return this.httpClient.get(url);
   }
 
+  /** HTML에서 법률안 목록을 파싱하여 반환합니다. */
   public parseTable(html: string): ITableData[] {
     return this.parser.parseTable(html);
   }
 
+  /** HTML에서 법률안 상세 내용을 파싱하여 반환합니다. */
   public parseContent(html: string): IContentData {
     return this.parser.parseContent(html);
   }
 
+  /** 진행 중인 입법예고 목록의 첫 페이지를 반환합니다. */
   public async get(): Promise<ITableData[]> {
     const html = await this.getPalHTML();
     return this.parser.parseTable(html);
   }
 
+  /** ID로 진행 중인 입법예고의 법률안 상세 페이지 HTML을 반환합니다. */
   public async getContentHTML(id: string): Promise<string> {
     const normalizedId = id.trim();
     if (!normalizedId) {
@@ -264,27 +261,31 @@ export class PalCrawl extends ScreenshotBase {
 
     const url = new URL(Config.CONTENT_URL, Config.DOMAIN);
     url.searchParams.set('lgsltPaid', normalizedId);
-    // Keep compatibility with currently used query key on the website.
+    // 사이트에서 현재 사용 중인 쿼리 키 호환성 유지
     url.searchParams.set('lgsltPaId', normalizedId);
 
     return this.httpClient.get(url);
   }
 
+  /** ID로 진행 중인 입법예고의 법률안 상세 정보를 조회합니다. */
   public async getContent(id: string): Promise<IContentData> {
     const html = await this.getContentHTML(id);
     return this.parser.parseContent(html);
   }
 
+  /** 완료된 입법예고 목록 페이지의 HTML을 반환합니다. */
   public async getDoneHTML(): Promise<string> {
     const url = new URL(Config.DONE_LIST_URL, Config.DOMAIN);
     return this.httpClient.get(url);
   }
 
+  /** 완료된 입법예고 목록의 첫 페이지를 반환합니다. */
   public async getDone(): Promise<ITableData[]> {
     const html = await this.getDoneHTML();
     return this.parser.parseTable(html);
   }
 
+  /** ID로 완료된 입법예고의 법률안 상세 페이지 HTML을 반환합니다. */
   public async getDoneContentHTML(id: string): Promise<string> {
     const normalizedId = id.trim();
     if (!normalizedId) {
@@ -298,6 +299,7 @@ export class PalCrawl extends ScreenshotBase {
     return this.httpClient.get(url);
   }
 
+  /** ID로 완료된 입법예고의 법률안 상세 정보를 조회합니다. */
   public async getDoneContent(id: string): Promise<IContentData> {
     const html = await this.getDoneContentHTML(id);
     return this.parser.parseContent(html);
@@ -305,14 +307,14 @@ export class PalCrawl extends ScreenshotBase {
 
   // ── Search / Filter ──────────────────────────────────────────────────────────
 
-  /** Fetch ongoing notices with optional filters and return parsed result with metadata. */
+  /** 진행 중인 입법예고를 검색합니다. 필터를 지정하지 않으면 1페이지를 반환합니다. */
   public async search(query: ISearchQuery = {}): Promise<ISearchResult> {
     const url = this.buildListUrl(Config.LIST_URL, { pageIndex: 1, ...query });
     const html = await this.httpClient.get(url);
     return this.parser.parseSearchResult(html);
   }
 
-  /** Fetch done notices with optional filters and return parsed result with metadata. */
+  /** 완료된 입법예고를 검색합니다. 필터를 지정하지 않으면 1페이지를 반환합니다. */
   public async searchDone(query: ISearchQuery = {}): Promise<ISearchResult> {
     const url = this.buildListUrl(Config.DONE_LIST_URL, {
       pageIndex: 1,
@@ -324,7 +326,7 @@ export class PalCrawl extends ScreenshotBase {
 
   // ── Explicit page access ─────────────────────────────────────────────────────
 
-  /** Fetch a specific page of ongoing notices. */
+  /** 진행 중인 입법예고의 특정 페이지 목록을 반환합니다. */
   public async getPage(
     pageIndex: number,
     pageUnit?: number,
@@ -333,7 +335,7 @@ export class PalCrawl extends ScreenshotBase {
     return result.items;
   }
 
-  /** Fetch a specific page of done notices. */
+  /** 완료된 입법예고의 특정 페이지 목록을 반환합니다. */
   public async getDonePage(
     pageIndex: number,
     pageUnit?: number,
@@ -382,8 +384,8 @@ export class PalCrawl extends ScreenshotBase {
   }
 
   /**
-   * Async generator that yields every page of ongoing notices.
-   * Respects `IBulkOptions` for rate-limiting and concurrency.
+   * 진행 중인 입법예고 전체 페이지를 순차적으로 yield하는 async generator.
+   * `IBulkOptions`로 딜레이·동시성·최대 페이지를 조절할 수 있습니다.
    */
   public getAllPages(
     query?: Omit<ISearchQuery, 'pageIndex'>,
@@ -397,8 +399,8 @@ export class PalCrawl extends ScreenshotBase {
   }
 
   /**
-   * Async generator that yields every page of done notices.
-   * Respects `IBulkOptions` for rate-limiting and concurrency.
+   * 완료된 입법예고 전체 페이지를 순차적으로 yield하는 async generator.
+   * `IBulkOptions`로 딜레이·동시성·최대 페이지를 조절할 수 있습니다.
    */
   public getAllDonePages(
     query?: Omit<ISearchQuery, 'pageIndex'>,
@@ -554,10 +556,12 @@ export class NsmLmSts extends ScreenshotBase {
     return this.httpClient.get(url);
   }
 
+  /** HTML에서 법안 목록 검색 결과를 파싱하여 반환합니다. */
   public parseList(html: string): INsmSearchResult {
     return this.parser.parseList(html);
   }
 
+  /** HTML에서 법안 상세 정보를 파싱하여 반환합니다. */
   public parseDetail(html: string): INsmBillDetail {
     return this.parser.parseDetail(html);
   }

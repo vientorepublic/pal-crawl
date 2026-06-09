@@ -50,6 +50,7 @@ export class PalParser {
     }
   }
 
+  /** HTML에서 입법예고 목록 테이블을 파싱하여 반환합니다. */
   public parseTable(html: string): ITableData[] {
     const $ = cheerio.load(html);
     const body = $('body');
@@ -93,6 +94,7 @@ export class PalParser {
     return output;
   }
 
+  /** HTML에서 목록 검색 결과(페이지 정보 + 아이템)를 파싱하여 반환합니다. */
   public parseSearchResult(html: string): ISearchResult {
     const $ = cheerio.load(html);
     const items = this.parseTable(html);
@@ -200,6 +202,7 @@ export class PalParser {
     };
   }
 
+  /** HTML에서 법률안 상세 내용을 파싱하여 반환합니다. */
   public parseContent(html: string): IContentData {
     const $ = cheerio.load(html);
 
@@ -322,6 +325,7 @@ export class NsmLmStsParser {
       .join('\n');
   }
 
+  /** HTML에서 국회입법현황 목록을 파싱하여 반환합니다. */
   public parseList(html: string): INsmSearchResult {
     const $ = cheerio.load(html);
     const items: INsmBillItem[] = [];
@@ -423,6 +427,7 @@ export class NsmLmStsParser {
     return { total, totalPages, currentPage, items };
   }
 
+  /** HTML에서 법안 상세 정보를 파싱하여 반환합니다. */
   public parseDetail(html: string): INsmBillDetail {
     const $ = cheerio.load(html);
 
