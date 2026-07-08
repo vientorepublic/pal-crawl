@@ -1102,8 +1102,13 @@ describe('NsmLmSts', () => {
   describe('search title hydration', () => {
     test('skips detail requests when list title is not truncated', async () => {
       const instance = new NsmLmSts();
+      const httpClient = (
+        instance as unknown as {
+          httpClient: { get: (url: URL) => Promise<string> };
+        }
+      ).httpClient;
       const mockGet = jest
-        .spyOn((instance as any).httpClient, 'get')
+        .spyOn(httpClient, 'get')
         .mockImplementation(async (...args: unknown[]) => {
           const url = args[0] as URL;
           const urlString = url.toString();
@@ -1123,8 +1128,13 @@ describe('NsmLmSts', () => {
 
     test('uses detail html title when list title is truncated', async () => {
       const instance = new NsmLmSts();
+      const httpClient = (
+        instance as unknown as {
+          httpClient: { get: (url: URL) => Promise<string> };
+        }
+      ).httpClient;
       const mockGet = jest
-        .spyOn((instance as any).httpClient, 'get')
+        .spyOn(httpClient, 'get')
         .mockImplementation(async (...args: unknown[]) => {
           const url = args[0] as URL;
           const urlString = url.toString();
@@ -1143,8 +1153,13 @@ describe('NsmLmSts', () => {
 
     test('keeps list title when detail request fails', async () => {
       const instance = new NsmLmSts();
+      const httpClient = (
+        instance as unknown as {
+          httpClient: { get: (url: URL) => Promise<string> };
+        }
+      ).httpClient;
       const mockGet = jest
-        .spyOn((instance as any).httpClient, 'get')
+        .spyOn(httpClient, 'get')
         .mockImplementation(async (...args: unknown[]) => {
           const url = args[0] as URL;
           const urlString = url.toString();
