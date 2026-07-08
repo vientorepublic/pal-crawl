@@ -228,6 +228,37 @@ const NSM_LIST_HTML_PENDING = `
 </table>
 `;
 
+/** 목록에서 제목이 잘린 케이스 */
+const NSM_LIST_HTML_TRUNCATED_TITLE = `
+<p class="numBuild">총 <span>1</span>건</p>
+<p class="numBuild">현재 <em>1</em>/<span>1</span>쪽</p>
+<table>
+  <tbody>
+    <tr>
+      <td data-th="의안명">
+        <a href="/gcom/nsmLmSts/out/2219088/detailRP">인공지능 기본법 일부개정...</a>
+      </td>
+      <td data-th="제안자(제안일자)">
+        <p>홍길동의원 등 10인</p>
+        <p>(2026.05.01.)</p>
+      </td>
+      <td data-th="상임위원회(소관부처)">
+        <p>과학기술정보방송통신위원회</p>
+        <p>(과학기술정보통신부)</p>
+      </td>
+      <td data-th="국회현황(추진일자)">
+        <p>위원회 회부</p>
+        <p>(2026.05.03.)</p>
+      </td>
+      <td data-th="의결현황(의결일자)">
+        <p>원안가결</p>
+        <p>(2026.05.20.)</p>
+      </td>
+    </tr>
+  </tbody>
+</table>
+`;
+
 /** 상세 페이지 */
 const NSM_DETAIL_HTML = `
 <h2></h2>
@@ -1067,6 +1098,84 @@ describe('NsmLmStsParser', () => {
 
 describe('NsmLmSts', () => {
   const nsm = new NsmLmSts();
+
+  describe('search title hydration', () => {
+    test('skips detail requests when list title is not truncated', async () => {
+      const instance = new NsmLmSts();
+      const httpClient = (
+        instance as unknown as {
+          httpClient: { get: (url: URL) => Promise<string> };
+        }
+      ).httpClient;
+      const mockGet = jest
+        .spyOn(httpClient, 'get')
+        .mockImplementation(async (...args: unknown[]) => {
+          const url = args[0] as URL;
+          const urlString = url.toString();
+          if (urlString.includes('/detailRP')) {
+            throw new Error('detail should not be requested for full title');
+          }
+          return NSM_LIST_HTML;
+        });
+
+      const result = await instance.search({ pageSize: 1 });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].billName).toBe('인공지능 기본법 일부개정법률안');
+      expect(mockGet).toHaveBeenCalledTimes(1);
+      mockGet.mockRestore();
+    });
+
+    test('uses detail html title when list title is truncated', async () => {
+      const instance = new NsmLmSts();
+      const httpClient = (
+        instance as unknown as {
+          httpClient: { get: (url: URL) => Promise<string> };
+        }
+      ).httpClient;
+      const mockGet = jest
+        .spyOn(httpClient, 'get')
+        .mockImplementation(async (...args: unknown[]) => {
+          const url = args[0] as URL;
+          const urlString = url.toString();
+          if (urlString.includes('/detailRP')) {
+            return NSM_DETAIL_HTML;
+          }
+          return NSM_LIST_HTML_TRUNCATED_TITLE;
+        });
+
+      const result = await instance.search({ pageSize: 1 });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].billName).toBe('인공지능 기본법 일부개정법률안');
+      mockGet.mockRestore();
+    });
+
+    test('keeps list title when detail request fails', async () => {
+      const instance = new NsmLmSts();
+      const httpClient = (
+        instance as unknown as {
+          httpClient: { get: (url: URL) => Promise<string> };
+        }
+      ).httpClient;
+      const mockGet = jest
+        .spyOn(httpClient, 'get')
+        .mockImplementation(async (...args: unknown[]) => {
+          const url = args[0] as URL;
+          const urlString = url.toString();
+          if (urlString.includes('/detailRP')) {
+            throw new Error('detail fetch failed');
+          }
+          return NSM_LIST_HTML_TRUNCATED_TITLE;
+        });
+
+      const result = await instance.search({ pageSize: 1 });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].billName).toBe('인공지능 기본법 일부개정...');
+      mockGet.mockRestore();
+    });
+  });
 
   // ── constructor ────────────────────────────────────────────────────────────
 

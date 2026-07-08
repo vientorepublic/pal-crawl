@@ -505,6 +505,7 @@ export interface INsmSearchQuery {
 export class NsmLmSts extends ScreenshotBase {
   private readonly httpClient: HttpClient;
   private readonly parser: NsmLmStsParser;
+  private readonly detailTitleConcurrency: number;
 
   constructor(config?: PalCrawlConfig) {
     super(config?.screenshot);
@@ -515,6 +516,65 @@ export class NsmLmSts extends ScreenshotBase {
       customHeaders: config?.customHeaders ?? {},
     });
     this.parser = new NsmLmStsParser();
+    this.detailTitleConcurrency = 4;
+  }
+
+  private isTruncatedBillName(billName: string): boolean {
+    return billName.includes('...') || billName.includes('…');
+  }
+
+  /**
+   * 목록의 잘린 제목을 상세 페이지 제목으로 보정합니다.
+   * 상세 조회 실패 시에는 기존 제목을 유지합니다.
+   */
+  private async hydrateBillNamesFromDetail(
+    items: INsmBillItem[],
+  ): Promise<INsmBillItem[]> {
+    if (items.length === 0) {
+      return items;
+    }
+
+    const normalizedConcurrency = Math.max(1, this.detailTitleConcurrency);
+    const hydrated = items.map((item) => ({ ...item }));
+    const truncatedItems = hydrated.filter((item) =>
+      this.isTruncatedBillName(item.billName),
+    );
+
+    if (truncatedItems.length === 0) {
+      return hydrated;
+    }
+
+    for (
+      let startIndex = 0;
+      startIndex < truncatedItems.length;
+      startIndex += normalizedConcurrency
+    ) {
+      const chunk = truncatedItems.slice(
+        startIndex,
+        startIndex + normalizedConcurrency,
+      );
+
+      await Promise.all(
+        chunk.map(async (item) => {
+          if (!item.billNo) {
+            return;
+          }
+
+          try {
+            const detailHtml = await this.getDetailHTML(item.billNo);
+            const detail = this.parser.parseDetail(detailHtml);
+            const detailTitle = detail.title.trim();
+            if (detailTitle) {
+              item.billName = detailTitle;
+            }
+          } catch {
+            // Keep list title when detail lookup fails.
+          }
+        }),
+      );
+    }
+
+    return hydrated;
   }
 
   private buildListUrl(query: INsmSearchQuery): URL {
@@ -569,7 +629,12 @@ export class NsmLmSts extends ScreenshotBase {
   /** 목록 검색 (필터 지원) */
   public async search(query: INsmSearchQuery = {}): Promise<INsmSearchResult> {
     const html = await this.getListHTML(query);
-    return this.parser.parseList(html);
+    const parsed = this.parser.parseList(html);
+    const items = await this.hydrateBillNamesFromDetail(parsed.items);
+    return {
+      ...parsed,
+      items,
+    };
   }
 
   /**
