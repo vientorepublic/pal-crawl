@@ -316,9 +316,9 @@ console.log(content);
 
 헤드리스 크로뮴(Puppeteer) 기반으로 웹페이지 스크린샷을 `Buffer`로 받을 수 있습니다.
 
-### initBrowser() => Promise\<Browser>
+### initBrowser() => Promise\<void>
 
-브라우저 인스턴스를 미리 초기화합니다. 반환되는 `Browser` 객체를 통해 추가적인 Puppeteer 작업을 수행할 수 있습니다. 스크린샷 호출 시 자동 초기화되므로 선택적으로 사용하면 됩니다.
+브라우저 인스턴스를 미리 초기화합니다. 스크린샷 호출 시 자동 초기화되므로 선택적으로 사용하면 됩니다.
 
 ### closeBrowser() => Promise\<void>
 
