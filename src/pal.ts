@@ -87,13 +87,14 @@ export abstract class ScreenshotBase {
   }
 
   /** Puppeteer 브라우저 인스턴스를 초기화합니다. */
-  public async initBrowser(): Promise<void> {
+  public async initBrowser(): Promise<Browser> {
     if (!this.browser) {
       this.browser = await puppeteer.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       });
     }
+    return this.browser;
   }
 
   /** Puppeteer 브라우저 인스턴스를 종료하고 리소스를 해제합니다. */
