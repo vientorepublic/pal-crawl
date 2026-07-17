@@ -72,7 +72,7 @@ export interface IBulkOptions {
  * `PalCrawl`과 `NsmLmSts` 양쪽에서 상속합니다.
  */
 export abstract class ScreenshotBase {
-  private browser: Browser | null = null;
+  public browser: Browser | null = null;
   protected screenshotConfig: ScreenshotOptions;
 
   protected constructor(screenshot?: ScreenshotOptions) {
@@ -87,14 +87,13 @@ export abstract class ScreenshotBase {
   }
 
   /** Puppeteer 브라우저 인스턴스를 초기화합니다. */
-  public async initBrowser(): Promise<Browser> {
+  public async initBrowser(): Promise<void> {
     if (!this.browser) {
       this.browser = await puppeteer.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       });
     }
-    return this.browser;
   }
 
   /** Puppeteer 브라우저 인스턴스를 종료하고 리소스를 해제합니다. */
