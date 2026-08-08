@@ -315,14 +315,21 @@ export interface INsmSearchResult {
 }
 
 export class NsmLmStsParser {
-  private normalizeText(text: string): string {
-    return text
-      .replace(/\u00a0/g, ' ')
-      .replace(/\r/g, '')
+  private normalizeText(
+    text: string,
+    options?: { preserveLineBreaks?: boolean },
+  ): string {
+    const normalized = text.replace(/\u00a0/g, ' ').replace(/\r/g, '');
+
+    const lines = normalized
       .split('\n')
-      .map((line) => line.replace(/\s+/g, ' ').trim())
-      .filter(Boolean)
-      .join('\n');
+      .map((line) => line.replace(/\s+/g, ' ').trim());
+
+    if (options?.preserveLineBreaks) {
+      return lines.join('\n');
+    }
+
+    return lines.filter(Boolean).join('\n');
   }
 
   /** HTML에서 국회입법현황 목록을 파싱하여 반환합니다. */
@@ -500,10 +507,14 @@ export class NsmLmStsParser {
       if ($pre.length) {
         const clone = $pre.clone();
         clone.find('br').replaceWith('\n');
-        const text = this.normalizeText(clone.text());
+        const text = this.normalizeText(clone.text(), {
+          preserveLineBreaks: true,
+        });
         proposalReason = text || null;
       } else {
-        const text = this.normalizeText($reasonTd.text());
+        const text = this.normalizeText($reasonTd.text(), {
+          preserveLineBreaks: true,
+        });
         proposalReason = text || null;
       }
     }
