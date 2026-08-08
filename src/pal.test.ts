@@ -1075,6 +1075,27 @@ describe('NsmLmStsParser', () => {
       );
     });
 
+    test('preserves blank lines in proposalReason', () => {
+      const html = `
+        <table>
+          <tbody>
+            <tr>
+              <th>발의정보</th>
+              <td>홍길동의원 등 10인, 제2219088호(2026. 5. 1.). 제435회 국회(임시회)</td>
+            </tr>
+            <tr>
+              <th>제안이유</th>
+              <td><pre>첫 번째 문장
+
+두 번째 문장</pre></td>
+            </tr>
+          </tbody>
+        </table>
+      `;
+      const detail = parser.parseDetail(html);
+      expect(detail.proposalReason).toBe('첫 번째 문장\n\n두 번째 문장');
+    });
+
     test('returns null proposalReason when pre tag is absent', () => {
       const detail = parser.parseDetail(NSM_DETAIL_HTML_NO_REASON);
       expect(detail.proposalReason).toBeNull();
