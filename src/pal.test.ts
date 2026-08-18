@@ -1148,7 +1148,7 @@ describe('NsmLmSts', () => {
     });
 
     test('uses detail html title when list title is truncated', async () => {
-      const instance = new NsmLmSts();
+      const instance = new NsmLmSts({ hydrateTruncatedTitles: true });
       const httpClient = (
         instance as unknown as {
           httpClient: { get: (url: URL) => Promise<string> };
@@ -1173,7 +1173,7 @@ describe('NsmLmSts', () => {
     });
 
     test('keeps list title when detail request fails', async () => {
-      const instance = new NsmLmSts();
+      const instance = new NsmLmSts({ hydrateTruncatedTitles: true });
       const httpClient = (
         instance as unknown as {
           httpClient: { get: (url: URL) => Promise<string> };
@@ -1194,6 +1194,28 @@ describe('NsmLmSts', () => {
 
       expect(result.items).toHaveLength(1);
       expect(result.items[0].billName).toBe('인공지능 기본법 일부개정...');
+      mockGet.mockRestore();
+    });
+
+    test('does not fetch details for truncated titles by default', async () => {
+      const instance = new NsmLmSts();
+      const httpClient = (
+        instance as unknown as {
+          httpClient: { get: (url: URL) => Promise<string> };
+        }
+      ).httpClient;
+      const mockGet = jest
+        .spyOn(httpClient, 'get')
+        .mockImplementation(async (...args: unknown[]) => {
+          const url = args[0] as URL;
+          expect(url.toString()).not.toContain('/detailRP');
+          return NSM_LIST_HTML_TRUNCATED_TITLE;
+        });
+
+      const result = await instance.search({ pageSize: 1 });
+
+      expect(result.items[0]?.billName).toBe('인공지능 기본법 일부개정...');
+      expect(mockGet).toHaveBeenCalledTimes(1);
       mockGet.mockRestore();
     });
   });

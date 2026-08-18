@@ -39,6 +39,8 @@ export interface PalCrawlConfig {
   retryCount?: number;
   customHeaders?: Record<string, string>;
   screenshot?: ScreenshotOptions;
+  /** 목록의 잘린 법안 제목을 상세 페이지에서 보정할지 여부 */
+  hydrateTruncatedTitles?: boolean;
 }
 
 export interface ISearchQuery {
@@ -506,6 +508,7 @@ export class NsmLmSts extends ScreenshotBase {
   private readonly httpClient: HttpClient;
   private readonly parser: NsmLmStsParser;
   private readonly detailTitleConcurrency: number;
+  private readonly hydrateTruncatedTitles: boolean;
 
   constructor(config?: PalCrawlConfig) {
     super(config?.screenshot);
@@ -517,6 +520,7 @@ export class NsmLmSts extends ScreenshotBase {
     });
     this.parser = new NsmLmStsParser();
     this.detailTitleConcurrency = 4;
+    this.hydrateTruncatedTitles = config?.hydrateTruncatedTitles ?? false;
   }
 
   private isTruncatedBillName(billName: string): boolean {
@@ -630,7 +634,9 @@ export class NsmLmSts extends ScreenshotBase {
   public async search(query: INsmSearchQuery = {}): Promise<INsmSearchResult> {
     const html = await this.getListHTML(query);
     const parsed = this.parser.parseList(html);
-    const items = await this.hydrateBillNamesFromDetail(parsed.items);
+    const items = this.hydrateTruncatedTitles
+      ? await this.hydrateBillNamesFromDetail(parsed.items)
+      : parsed.items;
     return {
       ...parsed,
       items,
