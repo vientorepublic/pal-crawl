@@ -72,6 +72,7 @@ interface PalCrawlConfig {
   retryCount?: number; // 재시도 횟수 (기본값: 3)
   customHeaders?: Record<string, string>; // 사용자 정의 헤더
   screenshot?: ScreenshotOptions; // 헤드리스 크로뮴 스크린샷 옵션
+  hydrateTruncatedTitles?: boolean; // 잘린 제목 상세 조회 여부 (기본값: false)
 }
 
 interface ScreenshotOptions {
@@ -477,7 +478,7 @@ for await (const page of palCrawl.getAllDonePages(
 
 ## NsmLmSts - 국민참여입법센터 국회입법현황
 
-`NsmLmSts` 클래스는 [국민참여입법센터 국회입법현황](https://opinion.lawmaking.go.kr/gcom/nsmLmSts/out)에서 법안 목록과 상세 정보를 크롤링합니다. 위원회 회부 이전 발의 상태 법안까지 필터링할 수 있는 것이 특징입니다.
+`NsmLmSts` 클래스는 [국민참여입법센터 국회입법현황](https://opinion.lawmaking.go.kr/gcom/nsmLmSts/out)에서 법안 목록과 상세 정보를 크롤링합니다. 위원회 회부 이전 발의 상태 법안까지 필터링할 수 있는 것이 특징입니다. 목록 검색은 기본적으로 목록 페이지만 요청하며, `...`으로 잘린 제목을 상세 페이지에서 보정하려면 `hydrateTruncatedTitles: true`를 명시해야 합니다.
 
 ---
 
@@ -490,6 +491,7 @@ const nsm = new NsmLmSts({
   userAgent: 'My Bot 1.0',
   timeout: 15000,
   retryCount: 3,
+  hydrateTruncatedTitles: true,
   customHeaders: { 'Accept-Language': 'ko-KR' },
 });
 ```
