@@ -20,4 +20,8 @@ export {
   type NsmResolutionStatus,
 } from './pal';
 export { PalParser, NsmLmStsParser } from './parser';
+export {
+  LikmsCrawler,
+  type LikmsCrawlerConfig,
+} from './likms';
 export { Config } from './config';
