@@ -1,5 +1,5 @@
 import { URL } from 'url';
-import puppeteer, { type Browser } from 'puppeteer';
+import type { Browser } from 'puppeteer';
 import { Config } from './config';
 import { HttpClient } from './http-client';
 import {
@@ -98,6 +98,8 @@ export abstract class ScreenshotBase {
   /** Puppeteer 브라우저 인스턴스를 초기화합니다. */
   public async initBrowser(): Promise<void> {
     if (!this.browser) {
+      // puppeteer 25+는 순수 ESM이므로 지연 로딩한다 (CJS 환경의 require(esm) 회피).
+      const { default: puppeteer } = await import('puppeteer');
       this.browser = await puppeteer.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -145,7 +147,8 @@ export abstract class ScreenshotBase {
             : undefined,
       });
 
-      return screenshotBuffer;
+      // puppeteer 25+는 Uint8Array를 반환하므로 공개 API(Buffer) 호환성을 유지한다.
+      return Buffer.from(screenshotBuffer);
     } finally {
       await page.close();
     }
