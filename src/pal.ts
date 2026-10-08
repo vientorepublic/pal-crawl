@@ -12,6 +12,7 @@ import {
   type INsmBillDetail,
   type INsmSearchResult,
 } from './parser';
+import { LikmsCrawler } from './likms';
 
 export type {
   IAttachment,
@@ -41,6 +42,12 @@ export interface PalCrawlConfig {
   screenshot?: ScreenshotOptions;
   /** 목록의 잘린 법안 제목을 상세 페이지에서 보정할지 여부 */
   hydrateTruncatedTitles?: boolean;
+  /**
+   * PAL 상세 페이지에서 제안이유가 비어 있을 때 국회 의안정보시스템
+   * (likms.assembly.go.kr)에서 제안이유를 보정할지 여부 (기본값: true).
+   * 보정 실패 시 기존 값(null)을 그대로 유지하며 오류를 던지지 않습니다.
+   */
+  hydrateProposalReason?: boolean;
 }
 
 export interface ISearchQuery {
@@ -156,6 +163,8 @@ export abstract class ScreenshotBase {
 export class PalCrawl extends ScreenshotBase {
   private readonly httpClient: HttpClient;
   private readonly parser: PalParser;
+  private readonly likms: LikmsCrawler;
+  private readonly hydrateProposalReason: boolean;
 
   constructor(config?: PalCrawlConfig) {
     super(config?.screenshot);
@@ -166,6 +175,13 @@ export class PalCrawl extends ScreenshotBase {
       customHeaders: config?.customHeaders ?? {},
     });
     this.parser = new PalParser();
+    this.likms = new LikmsCrawler({
+      userAgent: config?.userAgent ?? Config.UserAgent,
+      timeout: config?.timeout ?? 10000,
+      retryCount: config?.retryCount ?? 3,
+      customHeaders: config?.customHeaders ?? {},
+    });
+    this.hydrateProposalReason = config?.hydrateProposalReason ?? true;
   }
 
   /** 진행 중인 입법예고 목록 페이지 스크린샷을 반환합니다. */
@@ -269,10 +285,36 @@ export class PalCrawl extends ScreenshotBase {
     return this.httpClient.get(url);
   }
 
+  /**
+   * PAL 상세 페이지에서 파싱한 제안이유가 비어 있으면 국회 의안정보시스템
+   * (likms)에서 같은 의안의 제안이유를 조회해 채웁니다.
+   * 보정 실패·의안 없음 등의 경우 기존 결과를 그대로 반환합니다.
+   */
+  private async hydrateProposalReasonIfEmpty(
+    id: string,
+    content: IContentData,
+  ): Promise<IContentData> {
+    if (!this.hydrateProposalReason || content.proposalReason) {
+      return content;
+    }
+
+    try {
+      const proposalReason = await this.likms.getProposalReason(id);
+      if (proposalReason) {
+        return { ...content, proposalReason };
+      }
+    } catch {
+      // likms 보정 실패 시 기존 결과 유지
+    }
+
+    return content;
+  }
+
   /** ID로 진행 중인 입법예고의 법률안 상세 정보를 조회합니다. */
   public async getContent(id: string): Promise<IContentData> {
     const html = await this.getContentHTML(id);
-    return this.parser.parseContent(html);
+    const content = this.parser.parseContent(html);
+    return this.hydrateProposalReasonIfEmpty(id, content);
   }
 
   /** 완료된 입법예고 목록 페이지의 HTML을 반환합니다. */
@@ -304,7 +346,8 @@ export class PalCrawl extends ScreenshotBase {
   /** ID로 완료된 입법예고의 법률안 상세 정보를 조회합니다. */
   public async getDoneContent(id: string): Promise<IContentData> {
     const html = await this.getDoneContentHTML(id);
-    return this.parser.parseContent(html);
+    const content = this.parser.parseContent(html);
+    return this.hydrateProposalReasonIfEmpty(id, content);
   }
 
   // ── Search / Filter ──────────────────────────────────────────────────────────

@@ -8,4 +8,9 @@ export enum Config {
   // 국민참여입법센터 국회입법현황 (opinion.lawmaking.go.kr)
   NSM_DOMAIN = 'https://opinion.lawmaking.go.kr',
   NSM_LIST_URL = '/gcom/nsmLmSts/out',
+  // 국회 의안정보시스템 (likms.assembly.go.kr)
+  LIKMS_DOMAIN = 'https://likms.assembly.go.kr',
+  LIKMS_DETAIL_PAGE_URL = '/bill/bi/billDetailPage.do',
+  LIKMS_BILL_INFO_URL = '/bill/bi/bill/detail/billInfo.do',
+  LIKMS_CURR_MENU_NO = '2600044',
 }

@@ -98,19 +98,30 @@ export class HttpClient {
     return body.toString('utf8');
   }
 
-  private async makeRequest(url: URL): Promise<string> {
+  private async makeRequest(
+    url: URL,
+    method: 'GET' | 'POST' = 'GET',
+    body?: string,
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const headers = {
+      const headers: Record<string, string> = {
         'User-Agent': this.userAgent,
         ...this.customHeaders,
       };
 
+      if (method === 'POST' && body !== undefined) {
+        headers['Content-Type'] =
+          'application/x-www-form-urlencoded; charset=UTF-8';
+        headers['Content-Length'] = String(Buffer.byteLength(body));
+      }
+
       const options = {
         headers,
         timeout: this.timeout,
+        method,
       };
 
-      const req = https.get(url, options, (res) => {
+      const req = https.request(url, options, (res) => {
         if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
           reject(
             new Error(
@@ -126,8 +137,10 @@ export class HttpClient {
         });
 
         res.on('end', () => {
-          const body = Buffer.concat(chunks);
-          resolve(this.decodeBody(body, res.headers['content-type']));
+          const responseBody = Buffer.concat(chunks);
+          resolve(
+            this.decodeBody(responseBody, res.headers['content-type']),
+          );
         });
       });
 
@@ -140,16 +153,37 @@ export class HttpClient {
         reject(err);
       });
 
+      if (method === 'POST' && body !== undefined) {
+        req.write(body);
+      }
+
+      req.end();
       req.setTimeout(this.timeout);
     });
   }
 
   public async get(url: URL): Promise<string> {
+    return this.requestWithRetry(url, 'GET');
+  }
+
+  /**
+   * URL-encoded 본문을 POST로 전송합니다.
+   * 국회 의안정보시스템의 일부 조각(_fragment) 엔드포인트는 GET이 아닌 POST만 허용합니다.
+   */
+  public async post(url: URL, body: string): Promise<string> {
+    return this.requestWithRetry(url, 'POST', body);
+  }
+
+  private async requestWithRetry(
+    url: URL,
+    method: 'GET' | 'POST',
+    body?: string,
+  ): Promise<string> {
     let lastError: Error;
 
     for (let attempt = 1; attempt <= this.retryCount; attempt++) {
       try {
-        return await this.makeRequest(url);
+        return await this.makeRequest(url, method, body);
       } catch (error) {
         lastError = error as Error;
 
