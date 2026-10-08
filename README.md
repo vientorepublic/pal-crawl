@@ -40,6 +40,7 @@
   - [getAllPages (NsmLmSts)](#getallpagesquery-options--asyncgeneratorinsmsearchresult)
   - [getAllPendingPages](#getallpendingpagesquery-options--asyncgeneratorinsmsearchresult)
   - [Screenshot (NsmLmSts)](#getnsmlisscreenshotquery--promisebuffer)
+- [LikmsCrawler - 국회 의안정보시스템 제안이유 조회](#likmscrawler---국회-의안정보시스템-제안이유-조회)
 - [Examples](#examples)
 - [License](#license)
 
@@ -72,6 +73,8 @@ interface PalCrawlConfig {
   retryCount?: number; // 재시도 횟수 (기본값: 3)
   customHeaders?: Record<string, string>; // 사용자 정의 헤더
   screenshot?: ScreenshotOptions; // 헤드리스 크로뮴 스크린샷 옵션
+  hydrateTruncatedTitles?: boolean; // 잘린 제목 상세 조회 여부 (기본값: false)
+  hydrateProposalReason?: boolean; // 제안이유 빈 값일 때 의안정보시스템 보정 (기본값: true)
 }
 
 interface ScreenshotOptions {
@@ -149,6 +152,8 @@ interface IContentData {
   proposalSession: string | null; // 제안회기
 }
 ```
+
+PAL 상세 페이지에서 `proposalReason`이 비어 있는 의안이 있을 수 있습니다. 이때는 기본값(`hydrateProposalReason: true`)으로 국회 의안정보시스템(likms.assembly.go.kr)의 같은 의안에서 제안이유를 자동으로 보정합니다. 보정에 실패하더라도 기존 결과(`null`)를 그대로 유지하며 오류를 던지지 않습니다.
 
 `ISearchResult`는 검색/페이지 조회 결과를 나타내는 인터페이스입니다.
 
@@ -477,7 +482,7 @@ for await (const page of palCrawl.getAllDonePages(
 
 ## NsmLmSts - 국민참여입법센터 국회입법현황
 
-`NsmLmSts` 클래스는 [국민참여입법센터 국회입법현황](https://opinion.lawmaking.go.kr/gcom/nsmLmSts/out)에서 법안 목록과 상세 정보를 크롤링합니다. 위원회 회부 이전 발의 상태 법안까지 필터링할 수 있는 것이 특징입니다.
+`NsmLmSts` 클래스는 [국민참여입법센터 국회입법현황](https://opinion.lawmaking.go.kr/gcom/nsmLmSts/out)에서 법안 목록과 상세 정보를 크롤링합니다. 위원회 회부 이전 발의 상태 법안까지 필터링할 수 있는 것이 특징입니다. 목록 검색은 기본적으로 목록 페이지만 요청하며, `...`으로 잘린 제목을 상세 페이지에서 보정하려면 `hydrateTruncatedTitles: true`를 명시해야 합니다.
 
 ---
 
@@ -490,6 +495,7 @@ const nsm = new NsmLmSts({
   userAgent: 'My Bot 1.0',
   timeout: 15000,
   retryCount: 3,
+  hydrateTruncatedTitles: true,
   customHeaders: { 'Accept-Language': 'ko-KR' },
 });
 ```
@@ -760,6 +766,34 @@ try {
 ```
 
 > `takeScreenshot(url)`, `initBrowser()`, `closeBrowser()`, `updateScreenshotConfig()` 메서드는 `PalCrawl`과 공유되는 `ScreenshotBase`에서 상속됩니다.
+
+---
+
+## LikmsCrawler - 국회 의안정보시스템 제안이유 조회
+
+`LikmsCrawler`는 [국회 의안정보시스템](https://likms.assembly.go.kr)의 의안상세 페이지에서 제안이유 및 주요내용을 조회합니다. 의안상세 페이지는 심사정보 탭을 AJAX(POST)로 채우므로, 숨김 폼 파라미터를 추출해 `billInfo.do`에 POST한 뒤 `#prntSummary`에서 제안이유를 파싱합니다.
+
+PAL의 `contentId`(`PRC_...`)가 이 시스템의 `billId`와 동일하므로 그대로 전달할 수 있습니다.
+
+```typescript
+import { LikmsCrawler } from 'pal-crawl';
+
+const likms = new LikmsCrawler();
+
+// 제안이유 조회 (실패 시 null, 절대 예외를 던지지 않음)
+const reason = await likms.getProposalReason(
+  'PRC_G2G6E0D9E2Z3A1Y7Z5X1Y0W4E9E6D5',
+);
+console.log(reason);
+
+// 파싱만 수행하고 싶은 경우
+const fragmentHtml = await likms.getBillInfoHTML(
+  likms.parseDetailFormParams(await likms.getDetailPageHTML(billId)),
+);
+console.log(likms.parseProposalReason(fragmentHtml));
+```
+
+`PalCrawl`의 `getContent`/`getDoneContent`는 내부적으로 이 크롤러를 사용해 빈 `proposalReason`을 보정합니다(`hydrateProposalReason: false`로 비활성화 가능).
 
 ---
 
