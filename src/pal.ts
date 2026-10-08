@@ -59,11 +59,7 @@ export interface ISearchQuery {
   proposers?: string;
   ppslRsonMnCn?: string;
   sortCol?:
-    | 'BILL_NO'
-    | 'BILL_NAME'
-    | 'CURR_COMMITTEE'
-    | 'OPN_CNT'
-    | 'LGSLT_PA_RG_DT';
+    'BILL_NO' | 'BILL_NAME' | 'CURR_COMMITTEE' | 'OPN_CNT' | 'LGSLT_PA_RG_DT';
   sortGbn?: 'DESC' | 'ASC';
   fromAge?: number;
   toAge?: number;
@@ -506,13 +502,7 @@ export type NsmProposerType = '900201' | '900202' | '900203';
  * - 902917: 철회
  */
 export type NsmResolutionStatus =
-  | '902911'
-  | '902912'
-  | '902913'
-  | '902914'
-  | '902915'
-  | '902916'
-  | '902917';
+  '902911' | '902912' | '902913' | '902914' | '902915' | '902916' | '902917';
 
 export interface INsmSearchQuery {
   pageIndex?: number;

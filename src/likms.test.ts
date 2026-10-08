@@ -162,16 +162,12 @@ describe('LikmsCrawler', () => {
     const crawler = new LikmsCrawler();
 
     test('extracts reason from #prntSummary and strips repeated heading', () => {
-      const reason = crawler.parseProposalReason(
-        LIKMS_BILL_INFO_FRAGMENT_HTML,
-      );
+      const reason = crawler.parseProposalReason(LIKMS_BILL_INFO_FRAGMENT_HTML);
       expect(reason).toBe(EXPECTED_LIKMS_REASON);
     });
 
     test('reason does not contain the repeated section heading', () => {
-      const reason = crawler.parseProposalReason(
-        LIKMS_BILL_INFO_FRAGMENT_HTML,
-      );
+      const reason = crawler.parseProposalReason(LIKMS_BILL_INFO_FRAGMENT_HTML);
       expect(reason).not.toMatch(/^제안이유/);
       expect(reason).not.toContain('의안접수정보');
     });
@@ -311,9 +307,8 @@ describe('LikmsCrawler', () => {
 describe('PalCrawl hydrateProposalReason', () => {
   const setup = (config?: ConstructorParameters<typeof PalCrawl>[0]) => {
     const pal = new PalCrawl(config);
-    const palHttp = (
-      pal as unknown as { httpClient: MockableHttpClient }
-    ).httpClient;
+    const palHttp = (pal as unknown as { httpClient: MockableHttpClient })
+      .httpClient;
     const likms = (
       pal as unknown as { likms: { httpClient: MockableHttpClient } }
     ).likms;
@@ -379,9 +374,7 @@ describe('PalCrawl hydrateProposalReason', () => {
   test('keeps null proposalReason when likms lookup fails', async () => {
     const { pal, palHttp, likmsHttp } = setup();
     jest.spyOn(palHttp, 'get').mockResolvedValue(PAL_CONTENT_HTML_EMPTY_REASON);
-    jest
-      .spyOn(likmsHttp, 'get')
-      .mockRejectedValue(new Error('network down'));
+    jest.spyOn(likmsHttp, 'get').mockRejectedValue(new Error('network down'));
 
     const content = await pal.getContent(TEST_BILL_ID);
 

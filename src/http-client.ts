@@ -138,9 +138,7 @@ export class HttpClient {
 
         res.on('end', () => {
           const responseBody = Buffer.concat(chunks);
-          resolve(
-            this.decodeBody(responseBody, res.headers['content-type']),
-          );
+          resolve(this.decodeBody(responseBody, res.headers['content-type']));
         });
       });
 
