@@ -2,3 +2,4 @@ src/
 !/dist/**
 .github/
 coverage/
+agent_memories/
