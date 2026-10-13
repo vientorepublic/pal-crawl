@@ -1,5 +1,6 @@
 src/
 !/dist/**
+scripts/
 .github/
 coverage/
 agent_memories/

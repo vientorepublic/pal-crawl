@@ -8,6 +8,9 @@ dist/
 # ─── 테스트·커버리지 ───
 coverage/
 
+# ─── 사이트 드리프트 점검 리포트 (scripts/check-site-drift.js 산출물) ───
+.drift/
+
 # ─── 패키지 산출물 (npm pack / preview 스크립트) ───
 *.tgz
 

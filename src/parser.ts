@@ -531,3 +531,488 @@ export class NsmLmStsParser {
     };
   }
 }
+
+// ── 국회 의안정보시스템 의안현황 > 계류의안 (likms.assembly.go.kr) ──────────────
+
+/** 계류의안 목록의 법안 한 건 */
+export interface ILikmsStateBillItem {
+  /** 의안번호 (예: "2221880") */
+  billNo: string;
+  /** 의안정보시스템의 의안 ID (예: "PRC_..."), PAL contentId와 동일 */
+  billId: string;
+  /** 의안명 (대표발의자 포함, 예: "국가재정법 일부개정법률안(장종태의원 등 10인)") */
+  billName: string;
+  /** 의안명 끝 괄호에서 추출한 발의자 (없으면 빈 문자열) */
+  proposer: string;
+  /** 제안자구분 (예: "의원", "정부", "위원장") */
+  proposerKind: string;
+  /** 제안일자 (YYYY-MM-DD) */
+  proposalDate: string;
+  /** 소관위원회 (위원회 회부 전이면 빈 문자열) */
+  committee: string;
+  /** 심사진행상태 (예: "접수", "위원회 심사") */
+  progressStatus: string;
+  /** 목록에서 제안이유 팝업(openSummaryPopup) 링크가 노출되는지 여부 */
+  hasProposalReason: boolean;
+  /**
+   * 제안이유 및 주요내용.
+   * 목록 HTML에는 들어 있지 않으므로 파서는 항상 `null`을 넣고,
+   * `LikmsStateCrawler`의 보정 옵션(`hydrateProposalReason`)이 켜진 경우에만
+   * 의안상세 조회로 채워진다(보정 실패 시 `null` 유지).
+   */
+  proposalReason: string | null;
+  /** 의안상세 페이지 URL */
+  link: string;
+}
+
+/** 계류의안 목록 검색 결과 */
+export interface ILikmsStateSearchResult {
+  total: number;
+  totalPages: number;
+  currentPage: number;
+  items: ILikmsStateBillItem[];
+}
+
+/**
+ * 동명이인 선택 팝업의 후보 한 건.
+ * 같은 이름이 같은 대수에 둘 이상일 수도 있어(예: 21대 이수진 2인) `hanja`/`party`가
+ * 사람을 구분하는 단서가 된다.
+ */
+export interface ILikmsRepresentCandidate {
+  /** `representId`로 그대로 쓸 수 있는 의원 ID (예: "GJK57930") */
+  membId: string;
+  /** 의원명 (한글, 목록의 발의자 표기와 같은 이름) */
+  name: string;
+  /** 대수 라벨 (예: "22대") */
+  age: string;
+  /** 한자명 (없으면 빈 문자열) */
+  hanja: string;
+  /** 정당명 (없으면 빈 문자열) */
+  party: string;
+}
+
+/**
+ * 의안현황 검색조건의 소관위원회 한 건 (`/bi/bill/sch/findAgeCmt.do`).
+ *
+ * 대수 범위에 따라 구성이 달라지고, 범위를 넓히면 **같은 이름이 여러 코드**로
+ * 존재할 수 있다(예: `보건복지위원회(18대~22대)` = 9700341 / `보건복지위원회(14대~17대)` = 9700041).
+ * 그래서 검색 파라미터(`ageCmtId`)에는 이름이 아니라 코드를 넣어야 한다.
+ */
+export interface ILikmsCommittee {
+  /** `ageCmtId`에 넣는 소관위 코드 (예: "9700006") */
+  comCd: string;
+  /** 위원회명 (예: "법제사법위원회") */
+  comCdName: string;
+  /** 사이트 정렬 순서 (결측이면 `null`) */
+  cdOrd: number | null;
+}
+
+export class LikmsStateParser {
+  private normalizeText(text: string): string {
+    return text
+      .replace(/\u00a0/g, ' ')
+      .replace(/\r/g, '')
+      .split('\n')
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  /** 의안명 끝 괄호를 발의자로 추출합니다 (예: "...(장종태의원 등 10인)" → "장종태의원 등 10인"). */
+  private extractProposer(billName: string): string {
+    const match = billName.match(/\(([^()]*)\)\s*$/);
+    return match?.[1]?.trim() ?? '';
+  }
+
+  private buildDetailLink(billId: string): string {
+    if (!billId) {
+      return '';
+    }
+    return `${Config.LIKMS_DOMAIN}${Config.LIKMS_DETAIL_PAGE_URL}?billId=${encodeURIComponent(billId)}`;
+  }
+
+  /**
+   * 계류의안 목록 조각(AJAX 응답) HTML을 파싱하여 반환합니다.
+   * 잘못된 HTML·빈 결과에서는 빈 배열과 0을 반환하며 예외를 던지지 않습니다.
+   */
+  public parseList(html: string): ILikmsStateSearchResult {
+    const $ = cheerio.load(html);
+    const items: ILikmsStateBillItem[] = [];
+
+    const rowSelector = $('#state-list tbody tr').length
+      ? '#state-list tbody tr'
+      : 'table tbody tr';
+
+    $(rowSelector).each((_, tr) => {
+      const $tr = $(tr);
+      const $anchor = $tr.find('td.align_left a[data-bill-id]').first();
+      const billId = ($anchor.attr('data-bill-id') ?? '').trim();
+      if (!billId) {
+        // "조회된 데이터가 없습니다" 등 데이터 행이 아닌 경우 건너뜀
+        return;
+      }
+
+      const rawBillNo =
+        $tr.find('td.billNo').attr('title') ?? $tr.find('td.billNo').text();
+      const billNo = (rawBillNo ?? $anchor.attr('data-bill_no') ?? '').trim();
+
+      const anchorText = $anchor.clone();
+      anchorText.find('i').remove();
+      const billName =
+        this.normalizeText(anchorText.text()) ||
+        this.normalizeText(
+          ($anchor.attr('title') ?? '').replace(/\s*\(새창 열림\)\s*$/, ''),
+        );
+
+      const proposerKind = (
+        $tr.find('td.proposerKindName').attr('title') ??
+        $tr.find('td.proposerKindName').text()
+      ).trim();
+      const proposalDate = (
+        $tr.find('td.proposeDt').attr('title') ??
+        $tr.find('td.proposeDt').text()
+      ).trim();
+      const committee = $tr.find('td.currCmt').text().trim();
+      const progressStatus = (
+        $tr.find('td.procStageName').attr('title') ??
+        $tr.find('td.procStageName').text()
+      ).trim();
+      const hasProposalReason =
+        $tr.find('a[onclick*="openSummaryPopup"]').length > 0;
+
+      items.push({
+        billNo,
+        billId,
+        billName,
+        proposer: this.extractProposer(billName),
+        proposerKind,
+        proposalDate,
+        committee,
+        progressStatus,
+        hasProposalReason,
+        // 목록 HTML에는 제안이유 본문이 없다(필요하면 크롤러가 상세에서 보정).
+        proposalReason: null,
+        link: this.buildDetailLink(billId),
+      });
+    });
+
+    const countText = $('#pager_count_text').attr('value') ?? '';
+    let total = parseInt(countText.replace(/[^0-9]/g, ''), 10) || 0;
+
+    let currentPage = 1;
+    let totalPages = 0;
+
+    // 예: " (1/1,595 페이지)" — 전체 페이지 수에 천 단위 구분 쉼표가 들어간다.
+    const pagesText = $('#pager_pages_text').attr('value') ?? '';
+    const pagesMatch = pagesText.match(/\(([\d,]+)\s*\/\s*([\d,]+)\s*페이지\)/);
+    if (pagesMatch) {
+      currentPage = parseInt(pagesMatch[1].replace(/,/g, ''), 10);
+      totalPages = parseInt(pagesMatch[2].replace(/,/g, ''), 10);
+    }
+
+    if (totalPages === 0 && items.length > 0) {
+      totalPages = 1;
+      total = total || items.length;
+    }
+
+    return { total, totalPages, currentPage, items };
+  }
+
+  /**
+   * 동명이인 선택 팝업(`/bi/popup/selSameNmMemb.do`)의 후보 목록을 파싱합니다.
+   *
+   * 표는 한 행이 후보 한 명이고 컬럼은 대수·의원명·한자명·정당명입니다. 각 행의
+   * `data-mem-id`가 `representId`에 그대로 넣는 의원 ID이며, 1번째 셀은 모바일용
+   * 목록(`ul.m_list`)과 대수 라벨을 함께 담고 있어 데스크톱 컬럼을 우선 사용합니다.
+   *
+   * 데이터가 없거나(“조회된 데이터가 없습니다”) 잘못된 HTML이면 빈 배열을 반환합니다.
+   */
+  public parseSameNameCandidates(html: string): ILikmsRepresentCandidate[] {
+    const $ = cheerio.load(html);
+    const candidates: ILikmsRepresentCandidate[] = [];
+
+    const rowSelector = $('#data_sect tr').length
+      ? '#data_sect tr'
+      : 'tbody tr';
+
+    $(rowSelector).each((_, tr) => {
+      const $tr = $(tr);
+      const membId = (
+        $tr.find('[data-mem-id]').first().attr('data-mem-id') ?? ''
+      ).trim();
+      if (!membId) {
+        // 데이터 행이 아니거나(빈 결과 안내) ID가 없는 행
+        return;
+      }
+
+      const cells = $tr.find('td');
+      const mobileItems = cells.first().find('ul.m_list li');
+      const cellText = (index: number): string =>
+        this.normalizeText(cells.eq(index).text());
+      const mobileText = (index: number): string =>
+        this.normalizeText(mobileItems.eq(index).text());
+
+      candidates.push({
+        membId,
+        name: cellText(1) || mobileText(0),
+        age: this.normalizeText(cells.first().find('span').first().text()),
+        hanja: cellText(2) || mobileText(1),
+        party: cellText(3) || mobileText(2),
+      });
+    });
+
+    return candidates;
+  }
+
+  /**
+   * 소관위원회 목록 JSON(`/bi/bill/sch/findAgeCmt.do`)을 파싱합니다.
+   *
+   * 응답은 `{ "ageCmtList": [{ "comCd", "comCdName", "cdOrd" }] }` 형태이며,
+   * JSON이 아니거나 목록이 비면 빈 배열을 반환합니다(예외를 던지지 않습니다).
+   */
+  public parseCommittees(raw: string): ILikmsCommittee[] {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        return [];
+      }
+      throw error;
+    }
+
+    if (typeof parsed !== 'object' || parsed === null) {
+      return [];
+    }
+    const list = (parsed as Record<string, unknown>).ageCmtList;
+    if (!Array.isArray(list)) {
+      return [];
+    }
+
+    const committees: ILikmsCommittee[] = [];
+    for (const entry of list) {
+      if (typeof entry !== 'object' || entry === null) {
+        continue;
+      }
+      const record = entry as Record<string, unknown>;
+      const comCd = typeof record.comCd === 'string' ? record.comCd.trim() : '';
+      const comCdName =
+        typeof record.comCdName === 'string' ? record.comCdName.trim() : '';
+      if (!comCd || !comCdName) {
+        continue;
+      }
+
+      committees.push({
+        comCd,
+        comCdName,
+        cdOrd: typeof record.cdOrd === 'number' ? record.cdOrd : null,
+      });
+    }
+
+    return committees;
+  }
+}
+
+// ── 국회 의안정보시스템 의안상세 (billDetailPage.do + billInfo.do) ─────────────
+
+/** 의안상세의 문서(의안원문 등) 다운로드 링크 */
+export interface ILikmsDocAttachment {
+  /** 표시명 (예: "의안원문.hwp") */
+  filename: string;
+  /** 다운로드 URL (절대 URL) */
+  url: string;
+}
+
+/**
+ * 국회 의안정보시스템 의안상세에서 파싱한 정보.
+ *
+ * likms 의안상세는 한 번의 응답으로 끝나지 않는다(클래스 JSDoc 참조).
+ * - 상세 페이지(`billDetailPage.do`): 제목(`h3.detailh3`), 의안번호(`#form`)
+ * - 심사정보 탭 조각(`billInfo.do`): 접수정보(제안일자·제안자·제안회기), 제안이유, 문서
+ *
+ * 따라서 각 필드는 **전달된 HTML에 들어 있는 값만** 채워진다(없으면 빈 문자열·`null`·빈 배열).
+ */
+export interface ILikmsDetailInfo {
+  /** 의안명 — `[2221883] ` 접두는 제거하고 발의자 괄호는 유지한다 */
+  title: string;
+  billNo: string;
+  /** 제안자 (예: "주진우의원 등 10인") */
+  proposer: string;
+  /** 제안일자 (YYYY-MM-DD). NSM의 "2026. 5. 1." 형식과 다르다 */
+  proposalDate: string;
+  /** 제안회기 (예: "제22대(2024~2028)제439회") */
+  session: string;
+  proposalReason: string | null;
+  attachments: ILikmsDocAttachment[];
+}
+
+/**
+ * 국회 의안정보시스템 의안상세 파서.
+ *
+ * 상세 페이지 HTML과 심사정보 탭 조각 HTML을 **둘 다** 받을 수 있고, 들어 있는 값만
+ * 채우며 잘못된 HTML이면 빈 값을 반환한다(예외를 던지지 않는다).
+ * 사이트가 두 응답으로 나뉘어 있어 호출부는 `LikmsCrawler`/`LikmsStateCrawler`로
+ * 두 HTML을 모은 뒤 이 파서에 넘긴다.
+ */
+export class LikmsDetailParser {
+  /** NBSP 제거 + 줄 단위 공백 축약(빈 줄 제거) */
+  private normalizeText(text: string): string {
+    return text
+      .replace(/\u00a0/g, ' ')
+      .replace(/\r/g, '')
+      .split('\n')
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  /** 셀 텍스트의 라벨(`<i>의안번호</i>`)을 떼고 값만 남긴다 */
+  private cellText(value: string): string {
+    return this.normalizeText(value).trim();
+  }
+
+  /**
+   * `javascript: goDownload('/filegate/...')`에서 경로를 뽑아 절대 URL로 만든다.
+   * 다운로드 대상이 아닌 링크(`javascript:;` 미리보기 등)면 `null`.
+   */
+  private extractDownloadUrl(rawHref: string): string | null {
+    const href = rawHref.trim();
+    if (!href || href === 'javascript:;' || href === '#') {
+      return null;
+    }
+
+    if (href.startsWith('javascript:')) {
+      const path = href.match(/['"]([^'"]+)['"]/)?.[1]?.trim();
+      if (!path) {
+        return null;
+      }
+      return this.toAbsoluteUrl(path);
+    }
+
+    return this.toAbsoluteUrl(href);
+  }
+
+  private toAbsoluteUrl(path: string): string {
+    if (/^https?:\/\//.test(path)) {
+      return path;
+    }
+    return `${Config.LIKMS_DOMAIN}${path.startsWith('/') ? '' : '/'}${path}`;
+  }
+
+  /** 파일 제목/링크 텍스트에서 확장자를 뽑는다 */
+  private extractFileExtension(text: string): string {
+    if (/hwp|한글/i.test(text)) {
+      return 'hwp';
+    }
+    if (/pdf/i.test(text)) {
+      return 'pdf';
+    }
+    return '';
+  }
+
+  private parseAttachments(
+    $: cheerio.CheerioAPI,
+    selector: string,
+  ): ILikmsDocAttachment[] {
+    const attachments: ILikmsDocAttachment[] = [];
+
+    $(selector).each((_, el) => {
+      const $a = $(el);
+      const url = this.extractDownloadUrl($a.attr('href') ?? '');
+      if (!url) {
+        return;
+      }
+
+      const title = this.cellText($a.attr('title') ?? '');
+      const base = this.cellText(
+        title
+          .replace(/\([^)]*다운로드\)\s*$/, '')
+          .replace(/^의안접수정보\s*/, ''),
+      );
+      const filename = base || this.cellText($a.text());
+      if (!filename) {
+        return;
+      }
+
+      const extension = this.extractFileExtension(title || $a.text());
+      attachments.push({
+        filename: extension ? `${filename}.${extension}` : filename,
+        url,
+      });
+    });
+
+    return attachments;
+  }
+
+  /**
+   * 심사정보 탭 조각의 `#prntSummary`에서 제안이유 및 주요내용을 추출합니다.
+   * `#prntSummary`가 없거나 비어 있으면 `null`을 반환합니다.
+   */
+  public parseProposalReason(fragmentHtml: string): string | null {
+    const $ = cheerio.load(fragmentHtml);
+    const pre = $('#prntSummary').first();
+    if (!pre.length) {
+      return null;
+    }
+
+    const clone = pre.clone();
+    clone.find('br').replaceWith('\n');
+
+    const lines = clone
+      .text()
+      .replace(/\u00a0/g, ' ')
+      .replace(/\r/g, '')
+      .split('\n')
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+
+    // 첫 줄이 섹션 제목("제안이유 및 주요내용")을 반복하는 경우 제거
+    if (lines[0]?.replace(/\s+/g, '') === '제안이유및주요내용') {
+      lines.shift();
+    }
+
+    const text = lines.join('\n');
+    return text || null;
+  }
+
+  /**
+   * 의안상세 페이지 HTML 또는 심사정보 탭 조각 HTML을 파싱합니다.
+   * 두 HTML을 모두 넘길 수 있으며, 들어 있는 값만 채웁니다.
+   */
+  public parseDetail(html: string): ILikmsDetailInfo {
+    const $ = cheerio.load(html);
+
+    const rawTitle = (
+      $('h3.detailh3').first().attr('title') ?? $('h3.detailh3').first().text()
+    ).trim();
+    const title = this.normalizeText(rawTitle)
+      .replace(/^\[\d+\]\s*/, '')
+      .trim();
+
+    const pageBillNo = (
+      $('#form input[name="billNo"]').attr('value') ?? ''
+    ).trim();
+    const titleBillNo = rawTitle.match(/^\s*\[(\d+)\]/)?.[1] ?? '';
+
+    const billNo =
+      this.cellText($('#insc-rcp-row td.billNo span').first().text()) ||
+      pageBillNo ||
+      titleBillNo;
+
+    return {
+      title,
+      billNo,
+      proposer: this.cellText(
+        $('#insc-rcp-row td.proposer span').first().text(),
+      ),
+      proposalDate: this.cellText(
+        $('#insc-rcp-row td.proposeDt span').first().text(),
+      ),
+      session: this.cellText(
+        $('#insc-rcp-row td.sessionTitle span').first().text(),
+      ),
+      proposalReason: this.parseProposalReason(html),
+      attachments: this.parseAttachments($, '#insc-rcp-row td.doc a'),
+    };
+  }
+}

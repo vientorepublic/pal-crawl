@@ -14,12 +14,44 @@ export class HttpClient {
   private timeout: number;
   private retryCount: number;
   private customHeaders: Record<string, string>;
+  /** 응답의 Set-Cookie를 세션 동안 유지하기 위한 간단한 쿠키 저장소 */
+  private readonly cookies: Map<string, string> = new Map();
 
   constructor(config: HttpClientConfig) {
     this.userAgent = config.userAgent;
     this.timeout = config.timeout;
     this.retryCount = config.retryCount;
     this.customHeaders = config.customHeaders;
+  }
+
+  private buildCookieHeader(): string {
+    return Array.from(this.cookies.entries())
+      .map(([name, value]) => `${name}=${value}`)
+      .join('; ');
+  }
+
+  /**
+   * Set-Cookie 헤더를 쿠키 저장소에 반영합니다.
+   * 세션 쿠키(JSESSIONID 등)가 필요한 사이트(계류의안 AJAX 등)에서 사용합니다.
+   */
+  private storeCookies(setCookie: string[] | undefined): void {
+    if (!setCookie) {
+      return;
+    }
+    for (const raw of setCookie) {
+      const pair = raw.split(';')[0].trim();
+      const separatorIndex = pair.indexOf('=');
+      if (separatorIndex <= 0) {
+        continue;
+      }
+      const name = pair.slice(0, separatorIndex).trim();
+      const value = pair.slice(separatorIndex + 1).trim();
+      if (value === '') {
+        this.cookies.delete(name);
+      } else {
+        this.cookies.set(name, value);
+      }
+    }
   }
 
   private extractCharset(
@@ -102,12 +134,19 @@ export class HttpClient {
     url: URL,
     method: 'GET' | 'POST' = 'GET',
     body?: string,
+    extraHeaders?: Record<string, string>,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       const headers: Record<string, string> = {
         'User-Agent': this.userAgent,
         ...this.customHeaders,
+        ...extraHeaders,
       };
+
+      const cookieHeader = this.buildCookieHeader();
+      if (cookieHeader) {
+        headers['Cookie'] = cookieHeader;
+      }
 
       if (method === 'POST' && body !== undefined) {
         headers['Content-Type'] =
@@ -137,6 +176,7 @@ export class HttpClient {
         });
 
         res.on('end', () => {
+          this.storeCookies(res.headers['set-cookie']);
           const responseBody = Buffer.concat(chunks);
           resolve(this.decodeBody(responseBody, res.headers['content-type']));
         });
@@ -160,28 +200,36 @@ export class HttpClient {
     });
   }
 
-  public async get(url: URL): Promise<string> {
-    return this.requestWithRetry(url, 'GET');
+  public async get(
+    url: URL,
+    headers?: Record<string, string>,
+  ): Promise<string> {
+    return this.requestWithRetry(url, 'GET', undefined, headers);
   }
 
   /**
    * URL-encoded 본문을 POST로 전송합니다.
    * 국회 의안정보시스템의 일부 조각(_fragment) 엔드포인트는 GET이 아닌 POST만 허용합니다.
    */
-  public async post(url: URL, body: string): Promise<string> {
-    return this.requestWithRetry(url, 'POST', body);
+  public async post(
+    url: URL,
+    body: string,
+    headers?: Record<string, string>,
+  ): Promise<string> {
+    return this.requestWithRetry(url, 'POST', body, headers);
   }
 
   private async requestWithRetry(
     url: URL,
     method: 'GET' | 'POST',
     body?: string,
+    headers?: Record<string, string>,
   ): Promise<string> {
     let lastError: Error;
 
     for (let attempt = 1; attempt <= this.retryCount; attempt++) {
       try {
-        return await this.makeRequest(url, method, body);
+        return await this.makeRequest(url, method, body, headers);
       } catch (error) {
         lastError = error as Error;
 

@@ -19,6 +19,34 @@ export {
   type NsmProposerType,
   type NsmResolutionStatus,
 } from './pal';
-export { PalParser, NsmLmStsParser } from './parser';
-export { LikmsCrawler, type LikmsCrawlerConfig } from './likms';
+export {
+  PalParser,
+  NsmLmStsParser,
+  LikmsStateParser,
+  LikmsDetailParser,
+  type ILikmsCommittee,
+  type ILikmsStateBillItem,
+  type ILikmsStateSearchResult,
+  type ILikmsRepresentCandidate,
+  type ILikmsDetailInfo,
+  type ILikmsDocAttachment,
+} from './parser';
+export {
+  LikmsCrawler,
+  LikmsStateCrawler,
+  type LikmsCrawlerConfig,
+  type LikmsStateCrawlerConfig,
+  type ILikmsStateQuery,
+  type LikmsStateId,
+  type LikmsStateRepresentKind,
+  type LikmsStateProposerKind,
+  type LikmsStateSortOrder,
+  type LikmsStateCmtResult,
+  type LikmsStateJointProposal,
+} from './likms';
+export {
+  LikmsNsmAdapter,
+  type INsmListCrawler,
+  type INsmDetailCrawler,
+} from './nsm-compat';
 export { Config } from './config';
