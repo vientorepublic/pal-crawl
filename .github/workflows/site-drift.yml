@@ -1,12 +1,15 @@
-name: Site drift check
+name: Contract check (daily)
 
-# 대상 사이트(PAL·NSM·LIKMS)의 DOM·AJAX 계약이 실사이트에서 그대로인지 24시간마다 점검한다.
-# 드리프트가 감지되면 `site-drift` 이슈를 만들거나 갱신하고(제목 고정 → 중복 방지),
-# 워크플로를 실패시켜 GitHub 알림(실패 메일/알림)까지 함께 간다.
+# 크롤러 계약 검증 (정기) — 대상 사이트(PAL·NSM·LIKMS)의 DOM·AJAX 계약이 실사이트에서
+# 그대로인지 24시간마다 확인한다. 계약이 깨지면(선택자·엔드포인트·필드가 사라지면)
+# 파서는 규약상 예외를 던지지 않고 빈 값·null을 돌려주므로(AGENTS.md "파서는 절대
+# 예외를 던지지 않는다"), 그 회귀는 사용자 코드의 데이터 결손으로만 드러난다 —
+# 이 워크플로가 그 조용한 회귀를 먼저 잡는다.
 #
-# 왜 필요한가: 파서는 프로젝트 규약상 예외를 던지지 않고 빈 값·null을 돌려준다
-# (AGENTS.md "파서는 절대 예외를 던지지 않는다"). 그래서 사이트 리뉴얼은 사용자 코드의
-# 데이터 결손으로만 드러난다 — 이 워크플로가 그 조용한 회귀를 먼저 잡는다.
+# 계약 위반이 감지되면 `crawler-contract` 라벨의 이슈를 만들거나 갱신하고(제목 고정 →
+# 중복 방지), 워크플로를 실패시켜 GitHub 알림(실패 메일/알림)까지 함께 간다.
+# PR 시점에도 같은 계약을 확인해 병합을 막는다: `Contract check (pull requests)`
+# (`contract-live.yml`).
 #
 # 주의:
 # - `schedule`은 **기본 브랜치(main)** 에 있는 워크플로 파일만 실행한다.
@@ -34,7 +37,7 @@ on:
 
 permissions:
   contents: read
-  # 드리프트 알림 이슈 생성/코멘트/닫기에 필요(GITHUB_TOKEN)
+  # 계약 위반 알림 이슈 생성/코멘트/닫기에 필요(GITHUB_TOKEN)
   issues: write
 
 # 정기 점검이 겹쳐 사이트에 부하를 주지 않도록 동시 실행을 막는다.
@@ -59,17 +62,17 @@ jobs:
         run: npm ci
       # 계약 매니페스트와 src가 어긋나면(파서만 고친 경우) 실사이트 점검 전에 멈춘다.
       # 이미 PR CI(test.yml)에서도 도는 검증이라, 여기서는 정기 실행 자체를 자가 점검한다.
-      - name: Verify drift contracts against src
+      - name: Verify contract manifest against src
         run: npm run drift:contracts
 
       # 점검은 배포 산출물(dist)을 임포트해 **사용자가 실제로 받는 코드**를 기준으로 본다.
       - name: Build dist
         run: npm run build
 
-      - name: Check live sites
+      - name: Verify live site contracts
         id: check
         # 종료 코드를 읽어 알림 단계를 정해야 하므로 실패를 여기서 멈추지 않는다.
-        # 0 = 드리프트 없음, 1 = 드리프트 감지, 2 = 확인 불가(타임아웃 등)
+        # 0 = 계약 유지, 1 = 계약 위반(실사이트 응답이 계약과 다름), 2 = 확인 불가(타임아웃 등)
         continue-on-error: true
         env:
           SITES: ${{ inputs.sites }}
@@ -102,7 +105,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: site-drift-report
+          name: contract-check-report
           # hidden 디렉터리(.drift/)는 upload-artifact의 include-hidden-files 기본값(false)에
           # 걸려 조용히 빈 아티팩트가 된다 → 보이는 디렉터리를 쓴다.
           # (findings/2026-10-14-drift-artifact-hidden-dir)
@@ -129,11 +132,11 @@ jobs:
           esac
           bash scripts/notify-site-drift.sh drift-report/report.json "${mode}"
 
-      - name: Fail when drift is detected
+      - name: Fail when contracts are broken
         if: steps.check.outputs.code != '0'
         run: |
           if [ "${{ steps.check.outputs.code }}" = "1" ]; then
-            echo "::error::대상 사이트 구조 드리프트가 감지되었습니다 — 'site-drift' 이슈와 아티팩트(site-drift-report)를 확인하세요."
+            echo "::error::크롤러 계약 위반이 감지되었습니다(실사이트 응답이 계약과 다름) — 'crawler-contract' 이슈와 아티팩트(contract-check-report)를 확인하세요."
           else
             echo "::warning::사이트에 접속하지 못해 계약을 확인하지 못했습니다(일시 장애 가능). 다음 정기 점검에서 반복되면 조사하세요."
           fi

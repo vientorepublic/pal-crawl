@@ -1,10 +1,11 @@
-name: Contract check (live sites)
+name: Contract check (pull requests)
 
-# 피처 브랜치를 main에 머지하기 **전에**, 대상 사이트의 실제 응답이 계약
-# 매니페스트(scripts/drift-contracts)와 일치하는지 확인한다.
+# 크롤러 계약 검증 (PR) — 피처 브랜치를 main에 머지하기 **전에**, 대상 사이트의
+# 실제 응답이 계약 매니페스트(scripts/drift-contracts)와 일치하는지 확인한다.
+# 정기 실행 판본은 `Contract check (daily)`(`site-drift.yml`).
 #
 # 판정 규칙 — 정기 점검(site-drift.yml)과 다르다:
-#   - 드리프트(종료 코드 1) → 실패 → **병합 차단** (파서/계약을 함께 고쳐야 통과)
+#   - 계약 위반(종료 코드 1) → 실패 → **병합 차단** (파서/계약을 함께 고쳐야 통과)
 #   - 확인 불가(종료 코드 2: 타임아웃·연결 실패) → 경고만 하고 통과시킨다
 #     (사이트 일시 장애로 무관한 PR이 모두 막히는 것을 피한다)
 #
@@ -36,10 +37,10 @@ jobs:
       - name: Build dist
         run: npm run build
 
-      - name: Check live sites
+      - name: Verify live site contracts
         id: check
         # 종료 코드로 판정해야 하므로 여기서 멈추지 않는다.
-        # 0 = 계약 유지, 1 = 드리프트 감지, 2 = 확인 불가(타임아웃 등)
+        # 0 = 계약 유지, 1 = 계약 위반(실사이트 응답이 계약과 다름), 2 = 확인 불가(타임아웃 등)
         continue-on-error: true
         run: |
           set +e
@@ -63,29 +64,29 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: pr-drift-report
+          name: pr-contract-check-report
           # hidden 디렉터리(.drift/)를 쓰지 않는다 — upload-artifact는 include-hidden-files
           # 기본값(false)으로 hidden 파일을 제외해 조용히 빈 아티팩트가 된다(findings/2026-10-14-drift-artifact-hidden-dir).
           path: drift-report/
           if-no-files-found: warn
           retention-days: 14
 
-      # 필수 상태 체크로 지정할 판정 스텝 — 드리프트만 병합을 막는다.
-      - name: Decide (drift blocks, inconclusive passes)
+      # 필수 상태 체크로 지정할 판정 스텝 — 계약 위반만 병합을 막는다.
+      - name: Decide (broken contracts block, inconclusive passes)
         if: always()
         run: |
           code="${{ steps.check.outputs.code }}"
           case "${code}" in
             0)
-              echo "계약 유지 — 드리프트 없음"
+              echo "계약 유지 — 파서가 기대하는 계약이 실사이트에서 그대로입니다"
               exit 0
               ;;
             1)
-              echo "::error::대상 사이트 구조 드리프트가 감지되었습니다 — 파서와 scripts/drift-contracts의 계약을 같은 PR에서 고쳐야 병합할 수 있습니다."
+              echo "::error::크롤러 계약 위반이 감지되었습니다(실사이트 응답이 계약과 다름) — 파서와 scripts/drift-contracts의 계약을 같은 PR에서 고쳐야 병합할 수 있습니다."
               exit 1
               ;;
             2)
-              echo "::warning::일부 점검을 확인하지 못했습니다(타임아웃 등). 드리프트는 없으므로 병합을 막지 않습니다."
+              echo "::warning::일부 점검을 확인하지 못했습니다(타임아웃 등). 계약 위반은 없으므로 병합을 막지 않습니다."
               exit 0
               ;;
             *)
