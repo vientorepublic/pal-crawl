@@ -32,7 +32,7 @@ src/
   likms.ts        # LikmsCrawler
   *.test.ts       # 테스트는 소스와 동봉 (별도 test/ 디렉터리 없음)
 agent_memories/    # 에이전트 공유 메모리 (README.md = 형식 규칙, INDEX.md = 진입점)
-.github/workflows/  # test.yml, build.yml (Node 24, PR → main에서 실행)
+.github/workflows/  # test.yml, build.yml, contract-live.yml (PR → main), site-drift.yml (매일 06:00 KST)
 ```
 
 **설계 원칙**: 네트워크 담당(크롤러 클래스)과 HTML 파싱 담당(파서 클래스)을 분리한다.
@@ -267,11 +267,18 @@ gh api ...                      # 없는 API는 gh api로 직접 호출
    ⚠️ CI workflow는 `pull_request: branches: [main]` 전용 — main 대상 PR은 CI가 도우며
    **dev 대상 PR(현재 사실상 Renovate)은 CI가 돌지 않는다.** 어느 쪽이든 로컬 게이트는
    병합 전 필수이고, dev 대상 PR에서는 로컬 검증이 유일한 방어선이므로 생략 금지.
-3. PR 본문에 변경 유형(feat/fix/…)과 영향받는 사이트/파서를 명시.
-4. Renovate PR: 자동 브랜치이며 베이스는 `dev` (renovate.json 설정 — 피처는 main이 대상이어도 Renovate만 dev는 유지).
+3. **`main`은 보호 브랜치다** — 필수 상태 체크 `test` · `build` · `contract-live`가 모두
+   성공해야 병합된다(`strict: true`라 최신 `main` 기준 재검증이 필요하고, `enforce_admins`는
+   꺼져 있어 긴급 시 admin은 우회할 수 있다). `contract-live`는 PR마다 실사이트 계약
+   18건을 점검하므로 **드리프트가 있으면 병합이 막힌다** — 사이트 구조가 바뀐 PR은
+   `scripts/drift-contracts`의 계약을 같은 PR에서 함께 고친다. 확인 불가(종료 코드 2:
+   타임아웃 등)는 경고에 그치고 병합을 막지 않는다 (`.github/workflows/contract-live.yml`).
+   필수 체크 이름은 워크플로 잡 id이므로 **워크플로 간에 겹치면 안 된다**(예: `build.yml`의 잡은 `build`).
+4. PR 본문에 변경 유형(feat/fix/…)과 영향받는 사이트/파서를 명시.
+5. Renovate PR: 자동 브랜치이며 베이스는 `dev` (renovate.json 설정 — 피처는 main이 대상이어도 Renovate만 dev는 유지).
    병합 후 dev 동기화 루틴에서 함께 최신화하며, 의존성 업데이트는 Renovate에 맡긴다 —
    수동으로 `package.json`을 올리지 않는 것을 원칙으로 함 (잠금파일 함께 커밋).
-5. 하나의 PR은 하나의 목적. 파서 로직 변경과 리팩터링/포맷팅을 섞지 않는다.
+6. 하나의 PR은 하나의 목적. 파서 로직 변경과 리팩터링/포맷팅을 섞지 않는다.
 
 ## 릴리스
 

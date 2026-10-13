@@ -9,7 +9,8 @@ dist/
 coverage/
 
 # ─── 사이트 드리프트 점검 리포트 (scripts/check-site-drift.js 산출물) ───
-.drift/
+# hidden 디렉터리는 upload-artifact가 기본으로 제외하므로 보이는 이름을 쓴다.
+drift-report/
 
 # ─── 패키지 산출물 (npm pack / preview 스크립트) ───
 *.tgz

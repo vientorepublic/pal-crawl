@@ -1,0 +1,95 @@
+name: Contract check (live sites)
+
+# 피처 브랜치를 main에 머지하기 **전에**, 대상 사이트의 실제 응답이 계약
+# 매니페스트(scripts/drift-contracts)와 일치하는지 확인한다.
+#
+# 판정 규칙 — 정기 점검(site-drift.yml)과 다르다:
+#   - 드리프트(종료 코드 1) → 실패 → **병합 차단** (파서/계약을 함께 고쳐야 통과)
+#   - 확인 불가(종료 코드 2: 타임아웃·연결 실패) → 경고만 하고 통과시킨다
+#     (사이트 일시 장애로 무관한 PR이 모두 막히는 것을 피한다)
+#
+# 정기 점검과 달리 이슈·웹훅 알림은 하지 않는다 — PR 화면과 Step Summary가 곧 알림이다.
+# 리포팅 경로는 hidden 디렉터리를 쓰지 않는다(아래 주석 참조).
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  contract-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 정기 점검(site-drift.yml)과 같은 그룹으로 묶어 동시 실행을 막는다(대상 사이트 부하 방지).
+    concurrency:
+      group: site-drift
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - name: Use Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm ci
+
+      # 점검은 배포 산출물(dist)을 임포트해 **사용자가 실제로 받는 코드**를 기준으로 본다.
+      - name: Build dist
+        run: npm run build
+
+      - name: Check live sites
+        id: check
+        # 종료 코드로 판정해야 하므로 여기서 멈추지 않는다.
+        # 0 = 계약 유지, 1 = 드리프트 감지, 2 = 확인 불가(타임아웃 등)
+        continue-on-error: true
+        run: |
+          set +e
+          node scripts/check-site-drift.js \
+            --json drift-report/report.json \
+            --markdown drift-report/report.md
+          code=$?
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+          exit "${code}"
+
+      - name: Publish step summary
+        if: always()
+        run: |
+          if [ -f drift-report/report.md ]; then
+            cat drift-report/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "리포트가 생성되지 않았습니다(점검 단계가 시작되기 전에 실패)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-drift-report
+          # hidden 디렉터리(.drift/)를 쓰지 않는다 — upload-artifact는 include-hidden-files
+          # 기본값(false)으로 hidden 파일을 제외해 조용히 빈 아티팩트가 된다(findings/2026-10-14-drift-artifact-hidden-dir).
+          path: drift-report/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # 필수 상태 체크로 지정할 판정 스텝 — 드리프트만 병합을 막는다.
+      - name: Decide (drift blocks, inconclusive passes)
+        if: always()
+        run: |
+          code="${{ steps.check.outputs.code }}"
+          case "${code}" in
+            0)
+              echo "계약 유지 — 드리프트 없음"
+              exit 0
+              ;;
+            1)
+              echo "::error::대상 사이트 구조 드리프트가 감지되었습니다 — 파서와 scripts/drift-contracts의 계약을 같은 PR에서 고쳐야 병합할 수 있습니다."
+              exit 1
+              ;;
+            2)
+              echo "::warning::일부 점검을 확인하지 못했습니다(타임아웃 등). 드리프트는 없으므로 병합을 막지 않습니다."
+              exit 0
+              ;;
+            *)
+              echo "::error::점검 단계가 실행되지 않았습니다(종료 코드 '${code}') — 워크플로 로그를 확인하세요."
+              exit 1
+              ;;
+          esac
