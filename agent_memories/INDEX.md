@@ -7,6 +7,7 @@
 
 | id | type | title | status | updated |
 |----|------|-------|--------|---------|
+| [2026-10-14-inconclusive-retry](decisions/2026-10-14-inconclusive-retry.md) | decision | 확인 불가(타임아웃)는 지연 후 1회 재점검하고 판정 우선순위로 병합한다(드리프트는 가려지지 않음) | active | 2026-10-14 |
 | [2026-10-14-contract-verification-wording](decisions/2026-10-14-contract-verification-wording.md) | decision | 사람에게 보이는 이름을 "사이트 드리프트"에서 "크롤러 계약 검증"으로 통일하고 내부 식별자는 유지한다 | active | 2026-10-14 |
 | [2026-10-14-pr-contract-merge-gate](decisions/2026-10-14-pr-contract-merge-gate.md) | decision | PR마다 실사이트 계약을 점검해 main 필수 상태 체크로 묶고, 드리프트 시 병합을 차단한다 | active | 2026-10-14 |
 | [2026-10-14-drift-artifact-hidden-dir](findings/2026-10-14-drift-artifact-hidden-dir.md) | finding | 드리프트 리포트 아티팩트가 업로드되지 않는다 — .drift/가 hidden이라 upload-artifact 기본 설정이 제외(→ drift-report/로 경로 이전) | active | 2026-10-14 |
@@ -38,6 +39,7 @@
 
 ## 최근 활동
 
+- 2026-10-14: **일시 장애 재점검 도입** — 계약 위반 없이 확인 불가(타임아웃)가 남으면 검증기가 지연 후 1회(기본 15초, `--retry`/`--retry-delay`) 확인 불가가 난 사이트를 다시 점검하고, 판정 우선순위(`drift` > `ok` > `error` > `skipped`)로 병합한다 — 일시 장애는 회복되지만 **드리프트는 재점검 성공으로 가려지지 않는다**. 드리프트가 이미 있으면 재점검하지 않는다(실패가 확정인데 사이트 부하만 늘리므로). 기록은 리포트의 `retry`·점검별 `retried`/`previousStatus`에 남고 콘솔·Markdown·이슈 본문·웹훅이 보여준다. `--self-test`에 회복·잔여 확인 불가·드리프트 보존·렌더링 검증을 추가(12/12). 실측 중 별개 결함도 확인: `HttpClient`는 `retryCount: 0`이면 `undefined`를 던진다(`src/http-client.ts:243`).
 - 2026-10-14: **용어 통일 — "사이트 드리프트" → "크롤러 계약 검증"** — 워크플로 이름(`Contract check (pull requests)` / `Contract check (daily)`), 콘솔 배너·요약, Markdown 리포트, 이슈 제목·라벨(`crawler-contract`), 웹훅 제목, 아티팩트명(`contract-check-report`)을 계약 관점으로 바꿔 "무엇을 확인하는지"가 제목만 봐도 읽히게 했다. 상태 라벨도 `드리프트 감지` → `계약 위반`, `정상` → `계약 유지`. 파일명·npm 스크립트(`drift:*`)·`DRIFT_*` 환경변수·JSON 상태 값은 기계 계약이라 그대로 두었다(이유는 decision 레코드에).
 - 2026-10-14: **PR 시점 계약 검증 + main 필수 상태 체크로 병합 차단** — `contract-live.yml`(PR→main에서 실사이트 계약을 확인, 드리프트만 실패로 처리하고 확인 불가는 경고 후 통과)을 추가하고, 리포트 경로를 `.drift/`에서 `drift-report/`로 옮겨 아티팩트 업로드 결함을 함께 고쳤다. Build 워크플로 job id를 `build`로 바꿔 상태 체크 이름(`test`/`build`/`contract-live`)이 겹치지 않게 했다. 보호 규칙에는 필수 체크 3개(app 15368)와 `strict: true`를 걸었고, 네거티브 실측으로 확인: 실사이트에 없는 선택자를 단언한 임시 PR에서 `contract-live`만 FAILURE → `mergeStateStatus=BLOCKED`(녹색 PR은 `CLEAN`). `BLOCKED`는 체크 누락과 실패를 구분하지 않아 실측은 게이트를 추가한 브랜치에서 파생해야 했다.
 - 2026-10-14: **PR #91 병합 + 정기 드리프트 파이프라인 첫 실물 실행** — merge commit `f7c0b00`, `dev` 동기화(`dev`=`origin/dev`=`main`=`origin/main`). main에서 `workflow_dispatch`로 정기 점검이 스텝 전부 success(계약 검증·빌드·실사이트 18/18 ok·알림), 드리프트 0이라 실패 스텝은 skipped. 알림은 `resolved` 모드로 이슈를 건드리지 않았고 웹훅은 HTTP 204. 다만 리포트 아티팩트는 업로드되지 않았다(hidden 디렉터리 `.drift/` → `include-hidden-files` 기본 false) — 원인 분석은 finding 레코드에.
