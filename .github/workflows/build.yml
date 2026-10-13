@@ -4,8 +4,9 @@ on:
   pull_request:
     branches: [main]
 
+# job id가 상태 체크 이름이 된다 — `test`(test.yml)와 겹치지 않게 `build`로 둔다.
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

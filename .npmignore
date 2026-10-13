@@ -2,5 +2,6 @@ src/
 !/dist/**
 scripts/
 .github/
+drift-report/
 coverage/
 agent_memories/

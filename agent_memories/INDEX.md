@@ -7,6 +7,7 @@
 
 | id | type | title | status | updated |
 |----|------|-------|--------|---------|
+| [2026-10-14-drift-artifact-hidden-dir](findings/2026-10-14-drift-artifact-hidden-dir.md) | finding | 드리프트 리포트 아티팩트가 업로드되지 않는다 — .drift/가 hidden이라 upload-artifact 기본 설정이 제외(→ drift-report/로 경로 이전) | active | 2026-10-14 |
 | [2026-10-14-drift-contract-manifest](decisions/2026-10-14-drift-contract-manifest.md) | decision | 드리프트 계약을 선언적 매니페스트로 분리하고 src 대조로 강제한다(`drift:contracts`) | active | 2026-10-14 |
 | [2026-10-14-likms-state-list-field-emptiness](site-notes/2026-10-14-likms-state-list-field-emptiness.md) | site-note | likms 계류의안 1페이지 필드별 값 존재율 — 소관위는 회부 전이면 빈 값이 정상 | active | 2026-10-14 |
 | [2026-10-14-site-drift-daily-ci-check](tasks/2026-10-14-site-drift-daily-ci-check.md) | task | 사이트 드리프트 24시간 점검 CI 추가 — PAL·NSM·LIKMS의 DOM·AJAX 계약을 실사이트와 대조 | active | 2026-10-14 |
@@ -35,6 +36,8 @@
 
 ## 최근 활동
 
+- 2026-10-14: **PR 시점 계약 검증 + 병합 차단 준비** — `contract-live.yml`(PR→main에서 실사이트 계약을 확인, 드리프트만 실패로 처리하고 확인 불가는 경고 후 통과)을 추가하고, 리포트 경로를 `.drift/`에서 `drift-report/`로 옮겨 아티팩트 업로드 결함을 함께 고쳤다. Build 워크플로 job id를 `build`로 바꿔 상태 체크 이름(`test`/`build`/`contract-live`)이 겹치지 않게 했다.
+- 2026-10-14: **PR #91 병합 + 정기 드리프트 파이프라인 첫 실물 실행** — merge commit `f7c0b00`, `dev` 동기화(`dev`=`origin/dev`=`main`=`origin/main`). main에서 `workflow_dispatch`로 정기 점검이 스텝 전부 success(계약 검증·빌드·실사이트 18/18 ok·알림), 드리프트 0이라 실패 스텝은 skipped. 알림은 `resolved` 모드로 이슈를 건드리지 않았고 웹훅은 HTTP 204. 다만 리포트 아티팩트는 업로드되지 않았다(hidden 디렉터리 `.drift/` → `include-hidden-files` 기본 false) — 원인 분석은 finding 레코드에.
 - 2026-10-14: **드리프트 계약을 선언적 매니페스트로 분리** — 점검 항목(선택자·엔드포인트·필터·필드 형식·관계식)을 `scripts/drift-contracts/`의 사이트별 데이터로 옮기고, `scripts/check-site-drift.js`는 `kind: dom|parse|flow`를 실행하는 실행기로 정리했다. `npm run drift:contracts`가 **매니페스트 → 소스**(`usedBy` 문자열 실재)와 **소스 → 매니페스트**(페이지 특이 선택자 44개 전부 선언)를 대조하므로 파서 변경과 계약 변경이 같은 PR에 묶인다(네거티브 실측으로 양방향 확인). 실사이트 18/18 ok 유지, 리포트 형식·알림 스크립트 계약 불변. 리팩터링 중 실측으로 오탐 2건을 걷어냈다(다중 경로 `items[].x`는 항목이 없으면 통과, likms 목록 `committee`는 회부 전 빈 값이 정상).
 - 2026-10-14: **사이트 드리프트 24시간 점검 CI 추가** — `scripts/check-site-drift.js`가 `dist`의 공개 API로 실사이트 3곳을 호출해 파서가 의존하는 선택자·엔드포인트·응답 필드 18항목을 대조하고, `.github/workflows/site-drift.yml`이 매일 06:00 KST에 돌려 드리프트면 `site-drift` 이슈(+선택 웹훅)로 알린다. 판정은 `drift`(사이트 변경)와 `error`(확인 불가)를 분리해 일시 장애로 알림이 소진되지 않게 했다. 첫 실행 오탐 4건(빈 셀·빈 제안이유·비숫자 위원회 코드·문서 없는 건)은 계약을 실측에 맞추며 해소(오프라인 self-test + 네거티브 실측으로 검출기 검증).
 - 2026-10-13: **상임위 이름 → likms 코드 해석 구현** — 계류의안 페이지의 소관위 select는 옵션이 '전체' 하나뿐이라 JS가 AJAX로 채우는 `GET /bill/bi/bill/sch/findAgeCmt.do`(=`ageCmtList`, `/bill` 컨텍스트 필수)를 찾아 `findCommittees`로 노출. 어댑터가 `scCptPpostCmt`(이름)를 `ageCmtId`(코드)로 해석하고(대수 범위 캐시, 꼬리표·공백 무시), 미해석·동명이면 요청 전 예외. `cmtResultCd`(PRC_0000 계류/0011 폐기/0013 가결/0014 부결)·`jntPrpslYn`도 노출. 실측: 전체 15,950 / 법사위 1,618 / 계류 15,547 / 공동발의 Y 163+N 15,787. 점검 기록의 남은 문제 2번을 해소하며 그 레코드를 supersede.

@@ -77,13 +77,13 @@ jobs:
           set +e
           if [ -n "${SITES}" ]; then
             node scripts/check-site-drift.js \
-              --json .drift/report.json \
-              --markdown .drift/report.md \
+              --json drift-report/report.json \
+              --markdown drift-report/report.md \
               --sites "${SITES}"
           else
             node scripts/check-site-drift.js \
-              --json .drift/report.json \
-              --markdown .drift/report.md
+              --json drift-report/report.json \
+              --markdown drift-report/report.md
           fi
           code=$?
           echo "code=${code}" >> "$GITHUB_OUTPUT"
@@ -92,8 +92,8 @@ jobs:
       - name: Publish step summary
         if: always()
         run: |
-          if [ -f .drift/report.md ]; then
-            cat .drift/report.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -f drift-report/report.md ]; then
+            cat drift-report/report.md >> "$GITHUB_STEP_SUMMARY"
           else
             echo "리포트가 생성되지 않았습니다(점검 단계가 시작되기 전에 실패)." >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -103,7 +103,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: site-drift-report
-          path: .drift/
+          # hidden 디렉터리(.drift/)는 upload-artifact의 include-hidden-files 기본값(false)에
+          # 걸려 조용히 빈 아티팩트가 된다 → 보이는 디렉터리를 쓴다.
+          # (findings/2026-10-14-drift-artifact-hidden-dir)
+          path: drift-report/
           if-no-files-found: warn
           retention-days: 30
 
@@ -114,7 +117,7 @@ jobs:
         env:
           CHECK_CODE: ${{ steps.check.outputs.code }}
         run: |
-          if [ ! -f .drift/report.json ]; then
+          if [ ! -f drift-report/report.json ]; then
             echo "리포트가 없어 알림을 건너뜁니다(점검이 실행되지 않음)."
             exit 0
           fi
@@ -124,7 +127,7 @@ jobs:
             2) mode=inconclusive ;;
             *) echo "점검 코드를 알 수 없어 알림을 건너뜁니다: '${CHECK_CODE}'"; exit 0 ;;
           esac
-          bash scripts/notify-site-drift.sh .drift/report.json "${mode}"
+          bash scripts/notify-site-drift.sh drift-report/report.json "${mode}"
 
       - name: Fail when drift is detected
         if: steps.check.outputs.code != '0'
