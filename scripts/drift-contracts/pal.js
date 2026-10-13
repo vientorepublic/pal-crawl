@@ -240,5 +240,19 @@ module.exports = {
       extra: 'pal.reasonConsistency',
       summary: '의안번호 {billNumber} · 제안일 {proposalDate}',
     },
+
+    {
+      id: 'pal/gate-probe',
+      label: '게이트 차단 검증용 임시 계약(실사이트에 없는 선택자)',
+      kind: 'dom',
+      endpoint: 'list',
+      fetch: { op: 'pal.list', bind: 'palHtml' },
+      dom: [
+        {
+          selector: '#drift-gate-probe-does-not-exist',
+          note: '임시 — 차단 검증 후 제거',
+        },
+      ],
+    },
   ],
 };
