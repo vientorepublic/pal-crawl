@@ -17,3 +17,11 @@ jobs:
         run: npm ci
       - name: Run tests
         run: npm test
+      # 사이트 드리프트 검출기(scripts/check-site-drift.js)의 분류·판정 로직 검증.
+      # dist가 필요 없는 오프라인 테스트라 빌드 전에 돌려도 된다.
+      - name: Run site-drift checker self-test
+        run: npm run drift:self-test
+      # 계약 매니페스트(scripts/drift-contracts)와 src 소스의 대조.
+      # 파서를 고치고 계약을 두면 여기서 실패한다 — 계약 변경이 같은 PR에 묶이게 하는 장치.
+      - name: Verify drift contracts against src
+        run: npm run drift:contracts

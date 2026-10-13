@@ -506,7 +506,7 @@ export type NsmResolutionStatus =
 
 export interface INsmSearchQuery {
   pageIndex?: number;
-  /** 페이지당 건수 (10 | 20 | 50 | 100) */
+  /** 페이지당 건수 (기본값 20). 사이트는 임의 값을 그대로 반영한다(실측: 13·100) */
   pageSize?: number;
   /** 제안대수 시작 (예: "22" → 제22대) */
   sugCd?: string;
@@ -522,9 +522,13 @@ export interface INsmSearchQuery {
   rslRsltNmR?: NsmResolutionStatus;
   /** 상임위 (예: "법제사법위원회") */
   scCptPpostCmt?: string;
-  /** 제안일자 시작 (YYYY-MM-DD) */
+  /**
+   * 제안일자 시작. 사이트는 **`YYYYMMDD`(8자리)** 로 보낼 때만 의도대로 해석한다(실측 2026-10-13).
+   * `20260901` → 888건, `2026-09-01`(하이픈) → 5,903건(범위 불명), 하이픈으로 시작·종료를
+   * 함께 주면 0건이 된다.
+   */
   searchStDtNew?: string;
-  /** 제안일자 종료 (YYYY-MM-DD) */
+  /** 제안일자 종료. `searchStDtNew`와 함께 `YYYYMMDD`로 줄 때만 적용된다(`20260901`~`20260910` → 346건) */
   searchEdDtNew?: string;
   /** 제안자 */
   scPpsUsr?: string;

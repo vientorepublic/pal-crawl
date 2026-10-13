@@ -41,6 +41,17 @@
   - [getAllPendingPages](#getallpendingpagesquery-options--asyncgeneratorinsmsearchresult)
   - [Screenshot (NsmLmSts)](#getnsmlisscreenshotquery--promisebuffer)
 - [LikmsCrawler - 국회 의안정보시스템 제안이유 조회](#likmscrawler---국회-의안정보시스템-제안이유-조회)
+- [LikmsStateCrawler - 국회 의안정보시스템 계류의안](#likmsstatecrawler---국회-의안정보시스템-계류의안)
+  - [LikmsStateCrawler Configuration](#likmsstatecrawler-configuration)
+  - [LikmsStateCrawler Types](#likmsstatecrawler-types)
+  - [search (LikmsStateCrawler)](#searchquery-ilikmsstatequery--promiseilikmsstatesearchresult)
+  - [findCommittees](#findcommitteesagefrom-ageto--promiseilikmscommittee)
+  - [getPage (LikmsStateCrawler)](#getpagepageindex-number-query--promiseilikmsstatebillitem)
+  - [getAllPages (LikmsStateCrawler)](#getallpagesquery-options--asyncgeneratorilikmsstatesearchresult)
+- [LikmsNsmAdapter - NsmLmSts 호환 어댑터](#likmsnsmadapter---nsmlmsts-호환-어댑터)
+  - [발의 상태 조회 (`searchPending` / `getAllPendingPages`)](#발의-상태-조회-searchpending--getallpendingpages)
+  - [상세 조회 (`INsmDetailCrawler`)](#상세-조회-insmdetailcrawler)
+  - [쿼리 매핑](#쿼리-매핑)
 - [Examples](#examples)
 - [License](#license)
 
@@ -51,6 +62,8 @@
 국회입법예고(pal.assembly.go.kr) 사이트에서 진행 중인 입법 예고 데이터를 크롤링하는 도구입니다. 입법 예고의 주요 정보를 손쉽게 가져올 수 있습니다.
 
 국민참여입법센터 국회입법현황(opinion.lawmaking.go.kr)에서 법안을 크롤링하는 `NsmLmSts` 클래스도 포함되어 있습니다. 위원회 회부 이전에 발의된 상태로 대기 중인 법안까지 조회할 수 있습니다.
+
+국회 의안정보시스템(likms.assembly.go.kr)의 계류의안 목록을 수집하는 `LikmsStateCrawler`와, 제안이유를 조회하는 `LikmsCrawler`도 포함되어 있습니다. `LikmsStateCrawler`는 `NsmLmSts`의 계류 법안 조회를 대체할 수 있습니다.
 
 ---
 
@@ -178,11 +191,7 @@ interface ISearchQuery {
   proposers?: string; // 공동발의자 검색어 (쉼표 구분 AND 조건)
   ppslRsonMnCn?: string; // 제안이유 검색어
   sortCol?:
-    | 'BILL_NO'
-    | 'BILL_NAME'
-    | 'CURR_COMMITTEE'
-    | 'OPN_CNT'
-    | 'LGSLT_PA_RG_DT';
+    'BILL_NO' | 'BILL_NAME' | 'CURR_COMMITTEE' | 'OPN_CNT' | 'LGSLT_PA_RG_DT';
   sortGbn?: 'DESC' | 'ASC';
   // 종료된 입법예고 전용:
   fromAge?: number; // 시작 대수 (예: 21)
@@ -506,10 +515,14 @@ const nsm = new NsmLmSts({
 
 `INsmSearchQuery`는 목록 검색 필터 옵션입니다.
 
+> 제안일자는 **`YYYYMMDD`(8자리)** 로 보내야 한다(실측 2026-10-13: `20260901` → 888건,
+> `20260901`~`20260910` → 346건). 하이픈 형식(`2026-09-01`)은 시작일만 주면 5,903건으로
+> 범위가 어긋나고, 시작·종료를 함께 주면 0건이 된다.
+
 ```typescript
 interface INsmSearchQuery {
   pageIndex?: number; // 페이지 번호 (기본값: 1)
-  pageSize?: number; // 페이지당 건수 (10 | 20 | 50 | 100)
+  pageSize?: number; // 페이지당 건수 (기본 20, 임의 값 반영)
   sugCd?: string; // 제안대수 시작 (예: "22" → 제22대)
   endSugCd?: string; // 제안대수 끝
   sgtCls?: NsmProposerType; // 발의구분
@@ -517,8 +530,8 @@ interface INsmSearchQuery {
   rslRsltNmL?: NsmProgressStatus; // 국회현황 코드
   rslRsltNmR?: NsmResolutionStatus; // 의결현황 코드
   scCptPpostCmt?: string; // 상임위 (예: "법제사법위원회")
-  searchStDtNew?: string; // 제안일자 시작 (YYYY-MM-DD)
-  searchEdDtNew?: string; // 제안일자 종료 (YYYY-MM-DD)
+  searchStDtNew?: string; // 제안일자 시작 (YYYYMMDD — 하이픈 형식은 범위가 어긋난다)
+  searchEdDtNew?: string; // 제안일자 종료 (YYYYMMDD, 시작일과 함께 줄 때만 적용)
   scPpsUsr?: string; // 제안자
   issLawitmYn?: 'Y'; // 규제 신설·강화 해당 법안만
   stDt?: string; // 추진일자 시작 (YYYY-MM-DD)
@@ -794,6 +807,409 @@ console.log(likms.parseProposalReason(fragmentHtml));
 ```
 
 `PalCrawl`의 `getContent`/`getDoneContent`는 내부적으로 이 크롤러를 사용해 빈 `proposalReason`을 보정합니다(`hydrateProposalReason: false`로 비활성화 가능).
+
+---
+
+## LikmsStateCrawler - 국회 의안정보시스템 계류의안
+
+`LikmsStateCrawler`는 [국회 의안정보시스템](https://likms.assembly.go.kr)의 **의안현황 > 계류의안** 목록(`mooringBillPage.do`)을 수집합니다. 국민참여입법센터 `NsmLmSts`의 계류 법안 조회를 대체할 수 있도록 `search` / `getPage` / `getAllPages` 구조를 그대로 제공합니다.
+
+이 페이지는 목록을 AJAX(POST)로 채우고 Spring Security CSRF 토큰을 요구합니다. 크롤러는 첫 요청에서 페이지의 `<meta name="_csrf">` 토큰·세션 쿠키와 `#form` 숨김 필드를 확보해 캐시하고, 검색 본문은 그 숨김 필드를 기본값으로 깔고 요청 조건으로 덮어씁니다(브라우저가 폼을 직렬화해 보내는 방식과 동일). 토큰은 `X-CSRF-TOKEN` 헤더로 전송하며, 세션/CSRF 거부(401·403) 시 1회 자동 재발급·재시도합니다.
+
+> 숨김 필드를 함께 보내는 이유: 최소 파라미터만 보내면 서버가 **발의자 필터를 조용히 무시**합니다. 발의자 필터는 **의원 ID**(`representId`) + `representKindCd`를 함께 보내야 실제로 걸립니다(실측 확인). 서버도 크롤러도 **제안자명을 해석하지 않습니다** — 이름만으로는 어느 의원인지 확정할 수 없기 때문입니다. 이름밖에 모를 때는 [`findRepresentCandidates`](#발의자-후보-조회-findrepresentcandidates)로 사이트가 제시하는 후보를 보고 `membId`를 고릅니다.
+
+> 참고: 실측 결과 이 엔드포인트는 현재 CSRF 토큰을 서버에서 검증하지 않습니다(잘못된 토큰이나 헤더 없음도 정상 응답). 크롤러는 브라우저와 동일하게 토큰을 전송하되, 서버가 검증을 켜는 경우에도 동작하도록 세션 재발급 경로를 유지합니다.
+
+```typescript
+import { LikmsStateCrawler } from 'pal-crawl';
+
+const crawler = new LikmsStateCrawler();
+
+// 1페이지(50건) 조회
+const result = await crawler.search();
+console.log(result.total, result.totalPages);
+console.log(result.items[0]);
+// {
+//   billNo: '2221880',
+//   billId: 'PRC_EC79D21C54024C16A5D06122914938',   // PAL contentId와 동일
+//   billName: '국가재정법 일부개정법률안(장종태의원 등 10인)',
+//   proposer: '장종태의원 등 10인',
+//   proposerKind: '의원',
+//   proposalDate: '2026-10-13',
+//   committee: '',
+//   progressStatus: '접수',
+//   hasProposalReason: true,
+//   proposalReason: null,   // hydrateProposalReason 옵션을 켜면 채워진다
+//   link: 'https://likms.assembly.go.kr/bill/bi/billDetailPage.do?billId=PRC_...'
+// }
+```
+
+### LikmsStateCrawler Configuration
+
+`PalCrawl`과 동일한 네트워크 옵션을 받습니다.
+
+```typescript
+const crawler = new LikmsStateCrawler({
+  userAgent: 'Custom Agent',
+  timeout: 15000,
+  retryCount: 2,
+  customHeaders: { 'Accept-Language': 'ko-KR' },
+  hydrateProposalReason: true, // 목록의 제안이유를 의안상세에서 채움 (기본 false)
+});
+```
+
+#### 제안이유 보정 (`hydrateProposalReason`)
+
+목록에는 제안이유 본문이 없고 `hasProposalReason`(팝업 링크 노출)만 알 수 있다. 이 옵션을 켜면 `hasProposalReason`인 법안만 [`LikmsCrawler`](#likmscrawler---국회-의안정보시스템-제안이유-조회)로 의안상세를 조회해 `proposalReason`을 채운다.
+
+- **기본값은 `false`** — 건당 2회(상세 페이지 + `billInfo.do`) 요청이 추가되기 때문이다.
+- `hasProposalReason`가 false인 건은 조회하지 않고, 조회·파싱 실패 건은 기존 값(`null`)을 유지하며 예외를 던지지 않는다.
+- `search` / `getPage` / `getAllPages` 모두에 적용되며, `getAllPages`는 페이지마다 보정한다.
+- 속도는 `hydrateProposalReasons(items, { delayMs, concurrency })`를 직접 호출해 조절한다(기본 `delayMs: 500`, `concurrency: 1` = 순차 지연 요청).
+
+```typescript
+const crawler = new LikmsStateCrawler();
+const { items } = await crawler.search({ ageFrom: 22, ageTo: 22 });
+
+// 필요한 페이지만 골라서 보정 (입력 배열은 변경되지 않고 복사본이 반환된다)
+const hydrated = await crawler.hydrateProposalReasons(items, {
+  concurrency: 2,
+  delayMs: 300,
+});
+console.log(hydrated[0].proposalReason);
+```
+
+### 발의자 후보 조회 (`findRepresentCandidates`)
+
+likms 검색은 제안자 **이름을 받지 않고 의원 ID(`representId`)만** 받는다. 이름 하나를 ID로 자동 확정하지 않는 이유는 이름이 확정 값을 주지 못하기 때문이다 — 같은 이름이 여러 대수에 있거나 **같은 대수에** 둘 이상일 수 있고(예: 21대 이수진 2인), 한자는 동일인 키가 아니다(22대·17대 김문수 사례). 그래서 이름밖에 없을 때는 사이트가 제시하는 **후보 목록**을 받아 호출부가 고른다.
+
+```typescript
+import { LikmsStateCrawler } from 'pal-crawl';
+
+const crawler = new LikmsStateCrawler();
+
+const candidates = await crawler.findRepresentCandidates('이수진');
+// [
+//   { membId: 'D4L60530', name: '이수진', age: '21대', hanja: '李秀眞', party: '무소속' },
+//   { membId: '0R68099X', name: '이수진', age: '21대', hanja: '李壽珍', party: '더불어민주당' },
+// ]
+
+const picked = candidates[1]; // 대수·한자명·정당명으로 사람을 가린다
+const result = await crawler.search({
+  representId: picked.membId, // 후보의 membId = representId
+  representKindCd: 'REPR', // 대표발의만 (기본은 '전체' = 대표 + 공동발의)
+});
+```
+
+- 같은 이름이 **같은 대수에** 둘 이상일 수도 있어(예: 21대 이수진 2인) 대수만으로는 풀리지 않는다 → 정당·한자명이 단서다.
+- `ageFrom`/`ageTo`를 주면 그 범위로 좁혀 조회한다(기본 `01`–`99`).
+- 명단에 없으면 빈 배열을 반환한다. 이 엔드포인트는 GET이라 CSRF 토큰·세션이 필요 없다(실측: 쿠키 없이 200).
+- `LikmsNsmAdapter`에서는 `adapter.likms.findRepresentCandidates(...)`로 쓴다.
+
+```typescript
+interface ILikmsRepresentCandidate {
+  membId: string; // representId로 그대로 사용
+  name: string;
+  age: string; // 예: '22대'
+  hanja: string;
+  party: string;
+}
+```
+
+### LikmsStateCrawler Types
+
+```typescript
+interface ILikmsStateQuery {
+  pageIndex?: number;
+  pageSize?: number; // 페이지당 건수 (`rows`, 기본 50)
+  stateId?: 'mooring' | 'finish' | 'suggest' | 'beforePropose'; // 기본 'mooring'
+  stateDtlDivCd?: string; // 탭 구분 (기본 'all')
+  billNm?: string; // 의안명
+  billNo?: string; // 의안번호
+  representKindCd?: 'REPR' | 'SING' | 'COMM' | '전체'; // 발의구분
+  representId?: string; // 발의자 의원 ID (representKindCd와 셋트, 기본 '전체')
+  // 이름은 받지 않는다 → findRepresentCandidates로 후보를 확인
+  ageCmtId?: string; // 소관위원회 코드 (이름밖에 모르면 findCommittees로 확인)
+  cmtResultCd?: 'PRC_0000' | 'PRC_0011' | 'PRC_0013' | 'PRC_0014';
+  // 소관위 처리결과: 계류/폐기/가결/부결 (NSM 의결현황과 축이 다름)
+  jntPrpslYn?: 'Y' | 'N'; // 공동발의 여부
+  ageFrom?: string | number; // 제안대수 시작
+  ageTo?: string | number; // 제안대수 끝
+  billKind?: string; // 의안종류
+  listOrd?: string; // 정렬 컬럼
+  ordCd?: 'ASC' | 'DESC'; // 정렬 방향
+  fromPropDt?: string; // 제안일자 시작 (toPropDt와 함께 줘야 적용)
+  toPropDt?: string; // 제안일자 끝
+  nmReSchText?: string; // 결과 내 재검색어
+}
+
+interface ILikmsStateBillItem {
+  billNo: string;
+  billId: string; // PRC_... (= PAL contentId)
+  billName: string;
+  proposer: string;
+  proposerKind: string; // 제안자구분: 의원/정부/위원장
+  proposalDate: string;
+  committee: string;
+  progressStatus: string; // 심사진행상태: 접수/위원회 심사 등
+  hasProposalReason: boolean; // 목록에 제안이유 링크가 노출되는지
+  proposalReason: string | null; // 파서는 null — hydrateProposalReason으로 보정
+  link: string;
+}
+
+interface ILikmsStateSearchResult {
+  total: number;
+  totalPages: number;
+  currentPage: number;
+  items: ILikmsStateBillItem[];
+}
+```
+
+### search(query?: ILikmsStateQuery) => Promise\<ILikmsStateSearchResult>
+
+```typescript
+import { LikmsStateCrawler } from 'pal-crawl';
+
+const crawler = new LikmsStateCrawler();
+const result = await crawler.search({
+  billNm: '국가재정법',
+  ageFrom: 22,
+  ageTo: 22,
+});
+```
+
+### findCommittees(ageFrom?, ageTo?) => Promise\<ILikmsCommittee[]>
+
+대수 범위의 **소관위원회 목록**(코드·이름·정렬순서)을 조회합니다. 검색 파라미터 `ageCmtId`는 이름이 아니라 코드를 받으므로, 이름밖에 모를 때 이 메서드로 확인합니다.
+
+```typescript
+const committees = await crawler.findCommittees('22', '22');
+// [ { comCd: '1000000', comCdName: '본회의', cdOrd: 1 }, ... { comCd: '9700006', comCdName: '법제사법위원회', cdOrd: 3002 }, ... ]
+
+await crawler.search({ ageCmtId: '9700006', cmtResultCd: 'PRC_0000' }); // 계류 중인 법사위 소관 법안
+```
+
+- `ageFrom`/`ageTo`는 **둘 다** 줘야 범위가 적용됩니다(한쪽만 주면 서버가 무시하므로 예외).
+- 범위를 주지 않으면 전체 대수를 합친 목록(109건, 실측)을 주며, 이때 같은 이름은 `보건복지위원회(18대~22대)`처럼 대수 꼬리표로 구분됩니다.
+- 응답이 JSON이 아니면 빈 배열(예외 없음), 네트워크 오류는 전파합니다.
+
+### findRepresentCandidates(name, ageFrom?, ageTo?) => Promise\<ILikmsRepresentCandidate[]>
+
+발의자 후보(의원 ID + 대수·한자명·정당명)를 팝업 엔드포인트에서 조회합니다. 크롤러가 이름을 ID로 확정하지 않으므로, 이름으로 좁히려면 이 후보에서 `membId`를 골라 `representId`로 넘깁니다. 위 [발의자 후보 조회](#발의자-후보-조회-findrepresentcandidates) 참고.
+
+```typescript
+const candidates = await crawler.findRepresentCandidates('주진우');
+// [
+//   { membId: 'GJK57930', name: '주진우', age: '22대', hanja: '朱晋佑', party: '국민의힘' },
+//   { membId: 'IRT9826E', name: '주진우', age: '16대', hanja: '朱鎭旴', party: '한나라당' },
+// ]
+```
+
+### getPage(pageIndex: number, query?) => Promise\<ILikmsStateBillItem[]>
+
+```typescript
+const items = await crawler.getPage(2);
+```
+
+### getAllPages(query?, options?) => AsyncGenerator\<ILikmsStateSearchResult>
+
+```typescript
+for await (const page of crawler.getAllPages(
+  {},
+  { maxPages: 3, delayMs: 500 },
+)) {
+  console.log(page.currentPage, page.items.length);
+}
+```
+
+### 저수준 API (LikmsStateCrawler)
+
+```typescript
+const pageHtml = await crawler.getStatePageHTML(); // CSRF 토큰·세션 확보용
+const token = crawler.extractCsrfToken(pageHtml); // <meta name="_csrf">
+const fragment = await crawler.getStateListHTML(); // 목록 조각 HTML (AJAX)
+const parsed = crawler.parseList(fragment); // 목록 조각 → 객체
+```
+
+> 계류의안 목록의 `billId`는 PAL의 `contentId`와 동일하므로, 목록에 제안이유 링크가 있을 때(`hasProposalReason`) `LikmsCrawler.getProposalReason(billId)`로 제안이유를 조회할 수 있습니다.
+
+### 실제 네트워크 통합 테스트 (opt-in)
+
+`src/likms.live.test.ts`는 기본적으로 skip되며, 환경변수로만 실행됩니다(토큰 재발급, 페이지 경계, 필터 검증 포함).
+
+```bash
+LIKMS_LIVE_TEST=1 npx jest src/likms.live.test.ts
+```
+
+### 빌드 산출물 런타임 검증
+
+`scripts/verify-dist.js`는 **dist(tsc 산출물)를 그대로 require**해 export·파서·어댑터 매핑을 검증합니다. 테스트가 `src`(ts-jest)를 돌리는 것과 달리 배포물 자체를 확인하고, jest 없이 한 파일로 끝납니다.
+
+```bash
+npm run build
+npm run verify:dist        # 네트워크 없이 (export·파서·매핑)
+npm run verify:dist:live   # 실제 사이트 3곳까지 호출
+```
+
+각 검사는 `[ok]`/`[FAIL]`로 출력되고 실패가 있으면 exit 1로 끝나므로 CI나 수동 점검에 그대로 쓸 수 있습니다.
+
+---
+
+## LikmsNsmAdapter - NsmLmSts 호환 어댑터
+
+`LikmsNsmAdapter`는 `LikmsStateCrawler`를 국민참여입법센터 `NsmLmSts`와 **동일한 목록 조회 인터페이스**로 감싼다. `NsmLmSts`를 쓰던 호출부에서 생성자만 바꾸면 대부분 그대로 동작한다.
+
+> 예외: 제안자명(`scPpsUsr`)은 likms가 이름을 받지 않으므로 **지원하지 않는다**(설정하면 예외). 이름을 ID로 확정하기 위해 사이트를 조회하는 것은 값이 확정되지 않는 추측이므로 어댑터가 하지 않는다 — 필요하면 `adapter.likms.findRepresentCandidates()`로 후보를 골라 `representId`로 조회한다.
+>
+> 상임위명(`scCptPpostCmt`)은 다르다. 사이트가 확정 값을 주므로(소관위 목록 JSON) 어댑터가 코드로 해석해 `ageCmtId`로 보낸다. 대수 범위(`sugCd`/`endSugCd`) 안에서 찾고, 이름이 목록에 없거나 같은 이름이 여러 코드면 예외를 던진다.
+
+```typescript
+// 기존: import { NsmLmSts } from 'pal-crawl'; const crawler = new NsmLmSts();
+import { LikmsNsmAdapter } from 'pal-crawl';
+
+const crawler = new LikmsNsmAdapter();
+
+const result = await crawler.search({
+  pageIndex: 1,
+  pageSize: 10,
+  sugCd: '22',
+  endSugCd: '22',
+});
+const items = await crawler.getPage(2);
+for await (const page of crawler.getAllPages({}, { maxPages: 3 })) {
+  console.log(page.currentPage, page.items.length);
+}
+
+// 제안자명(`scPpsUsr`)은 미지원 — likms가 이름을 받지 않으므로 예외를 던진다.
+// 후보를 골라 ID로 조회하려면 `adapter.likms`를 직접 쓴다(후보는 사이트가 제시하는 값).
+const candidates = await crawler.likms.findRepresentCandidates('문진석');
+const byMember = await crawler.likms.search({
+  representId: candidates[0].membId,
+  representKindCd: 'REPR',
+});
+```
+
+`INsmListCrawler` 포트를 `NsmLmSts`와 `LikmsNsmAdapter`가 모두 만족하므로, 두 구현을 같은 변수 타입으로 다룰 수 있다.
+
+```typescript
+import { NsmLmSts, LikmsNsmAdapter, type INsmListCrawler } from 'pal-crawl';
+
+const crawler: INsmListCrawler = useLikms
+  ? new LikmsNsmAdapter()
+  : new NsmLmSts();
+```
+
+### 발의 상태 조회 (`searchPending` / `getAllPendingPages`)
+
+`NsmLmSts`의 `searchPending`(서버에서 `rslRsltNmL=900101` '발의'로 필터)에 대응하는 대안이다.
+
+likms에는 심사진행상태를 좁히는 **유효한 서버 필터가 없다** — 파라미터 `srngPrgrsSttsCd`는
+존재하고 서버가 실제로 조건을 걸지만(알 수 없는 값이면 0건), 사이트가 값 목록을 렌더하지 않아
+코드를 얻을 수 없었다(실측: 상세 페이지의 `RECEIVE`/`CMT`/`EXAM`/`MAIN`/`GOVTRANS`/`DCS`, `PRC_`·`PSC_` 계열,
+숫자, 한글 라벨 모두 0건). 그래서 목록을 앞에서부터 스캔하며 `progressStatus === '접수'`인
+항목만 걸러낸다.
+
+```typescript
+import { LikmsNsmAdapter } from 'pal-crawl';
+
+const crawler = new LikmsNsmAdapter();
+
+// 접수가 나올 때까지 순차 스캔 (기본 10페이지 · 페이지당 100건)
+const pending = await crawler.searchPending({}, { maxPages: 5, delayMs: 500 });
+console.log(pending.items.map((item) => item.billNo));
+
+// 전부 순회
+for await (const page of crawler.getAllPendingPages({}, { maxPages: 10 })) {
+  console.log(page.items.length);
+}
+```
+
+주의할 점:
+
+- **스캔 비용**이 든다(서버 필터 없음). `delayMs`·`maxPages`로 범위를 조절하고, 찾지 못하면 빈 결과를 받는다.
+- 접수 건이 없는 페이지는 건너뛰므로 `currentPage`는 원본 페이지 번호가 아니고, `pageIndex`로 건너뛸 수 없다.
+- `items`는 접수 항목만이지만 `total`/`totalPages`는 **전체(접수 포함) 기준** 원본 값이다.
+- `progressStatus`는 likms 어휘 `'접수'`이며 NSM의 `'발의'`와 문자열이 다르다.
+- 실측 대조: likms `접수` 14건 중 12건이 NSM `발의` 조회에 포함되어 같은 부분집합임을 확인했다.
+
+저수준 API(`LikmsStateCrawler.filterPending` / `getAllPendingPages` / `searchPending`)도 같은 동작을 제공한다.
+
+### 상세 조회 (`INsmDetailCrawler`)
+
+`getDetailHTML` / `parseDetail` / `getDetail`도 같은 포트(`INsmDetailCrawler`)로 교체할 수 있다.
+
+```typescript
+import { NsmLmSts, LikmsNsmAdapter, type INsmDetailCrawler } from 'pal-crawl';
+
+const crawler: INsmDetailCrawler = useLikms
+  ? new LikmsNsmAdapter()
+  : new NsmLmSts();
+
+// 의안번호(2221883)는 likms의 billId(PRC_...)로 자동 해석된다.
+const detail = await crawler.getDetail('2221883');
+console.log(detail.title, detail.proposalReason, detail.attachments);
+
+// 저장해 둔 HTML을 오프라인으로 파싱 (네트워크 호출 없음)
+const offline = crawler.parseDetail(savedHtml);
+```
+
+likms 의안상세는 응답이 둘로 나뉜다(제목은 상세 페이지, 발의정보·제안이유는 심사정보 탭 AJAX).
+어댑터의 `getDetail`은 두 요청을 합쳐 채우고, `parseDetail`은 넘긴 HTML에 들어 있는 값만 채운다.
+
+| 항목                   | NsmLmSts                   | LikmsNsmAdapter                                                |
+| ---------------------- | -------------------------- | -------------------------------------------------------------- |
+| 인자                   | 의안번호(`2219088`)        | 의안번호(`2221883`) 또는 billId(`PRC_...`)                     |
+| `proposalInfo`         | 발의정보 원문 한 줄        | 접수정보로 조합한 문자열 (`제안자, 제N호(제안일자). 제안회기`) |
+| `proposalDate`         | `2026. 5. 1.`              | `2026-10-13`                                                   |
+| `session`              | `제435회 국회(임시회)`     | `제22대(2024~2028)제439회`                                     |
+| `attachments[].fileId` | 숫자 ID(`fnDownload` 인자) | 다운로드 URL                                                   |
+
+없는 의안번호면 `Error('bill not found: ...')`를 던진다(`NsmLmSts`는 빈 상세를 반환).
+`LikmsDetailParser`가 상세 페이지 HTML과 심사정보 조각 HTML을 모두 받아 파싱한다.
+
+### 쿼리 매핑
+
+| INsmSearchQuery                   | ILikmsStateQuery                   | 비고                                                                                                                                                                                                 |
+| --------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pageIndex`                       | `pageIndex`                        |                                                                                                                                                                                                      |
+| `pageSize`                        | `pageSize`(`rows`)                 | 양쪽 다 임의 값 반영(실측). 기본값만 다르다 — NSM 20건 ↔ likms 50건                                                                                                                                  |
+| `sugCd` / `endSugCd`              | `ageFrom` / `ageTo`                | 제안대수                                                                                                                                                                                             |
+| `sgtCls`                          | `proposerKind`                     | 900201→GOV, 900202→MEMASEMBY, 900203→CHRPR                                                                                                                                                           |
+| `scCptPpostCmt`                   | `ageCmtId`                         | 상임위 **이름**을 `/bi/bill/sch/findAgeCmt.do` 목록에서 코드로 해석(꼬리표·공백 무시). 대수 범위는 `sugCd`/`endSugCd`를 따른다 — 이름이 없거나 여러 코드면 예외                                      |
+| `scPpsUsr`                        | — (미지원)                         | 제안자명 — likms는 이름을 받지 않아 옮길 수 없다. 지정하면 예외를 던진다(조용히 무시하면 필터가 빠진 전체 결과가 나옴). `adapter.likms.findRepresentCandidates()`로 후보를 골라 `representId`로 조회 |
+| `searchStDtNew` / `searchEdDtNew` | `fromPropDt` / `toPropDt`          | 제안일자 — likms는 **양쪽 모두** 줘야 서버가 적용(한쪽만이면 전체). NSM은 `YYYYMMDD`여야 하므로(`YYYY-MM-DD` 양쪽 → 0건) 형식을 그대로 옮기면 필터가 사라진다                                        |
+| `sortOrder`                       | `ordCd`                            | ASC/DESC                                                                                                                                                                                             |
+| `scBlNmSct`                       | `billNo`(숫자) 또는 `billNm`(문자) | 값 형태로 판별                                                                                                                                                                                       |
+
+동일 축이 없어 무시되는 필드: `rslRsltNmL`, `rslRsltNmR`, `cptOfiOrgCd`, `sortCol`, `issLawitmYn`, `stDt`/`edDt`.
+
+NSM 쪽에 대응 필드가 없는 likms 전용 축은 `adapter.likms.search()`로 직접 지정한다: `cmtResultCd`(소관위 처리결과), `jntPrpslYn`(공동발의 여부), `stateDtlDivCd`(탭), `nmReSchText`(결과 내 재검색).
+
+`searchPending`/`getAllPendingPages`는 포트에 포함하지 않는다. `NsmLmSts`는 서버 필터로 좁히지만 likms는 전체를 스캔해야 해서 같은 이름 뒤에 비용 차이를 숨기지 않기 위해서다. 호출부가 명시적으로 고를 수 있도록 `LikmsNsmAdapter`가 같은 이름의 **스캔 기반 대안**을 제공한다(위 “발의 상태 조회” 절 참조). 스캔이라 `options.maxPages`(기본 10) 밖에서만 접수 항목이 나오면 빈 결과를 주고, NSM과 달리 `progressStatus === '접수'` 항목이 없는 페이지는 건너뛰므로 `currentPage`도 원본 페이지 번호가 아니다. 계류의안 전용 API(`hasProposalReason`, `billId`, `clearSession` 등)가 필요하면 `adapter.likms`(`LikmsStateCrawler`)를 직접 사용한다.
+
+### NsmLmSts에서 교체할 때 (호환성 감사 요약)
+
+생성자만 바꾸면 되는 범위는 **목록 조회와 상세 조회**다.
+
+| `NsmLmSts` 멤버                                                                                                          | 교체 결과                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `getListHTML`, `parseList`, `search`, `getPage`, `getAllPages`                                                           | 그대로 동작(시그니처·결과 필드 동일)                                                                                    |
+| `getDetailHTML`, `parseDetail`, `getDetail`                                                                              | 그대로 동작 — `INsmDetailCrawler` 포트. 값 형식은 다르다(위 표 참고)                                                    |
+| `searchPending`, `getAllPendingPages`                                                                                    | 스캔 기반 대안 제공 — 서버 필터가 없어 `progressStatus === '접수'`로 걸러낸다. 포트에는 없다(비용 차이를 드러내기 위해) |
+| `getNsmListScreenshot`, `getDetailScreenshot`, `initBrowser`, `closeBrowser`, `takeScreenshot`, `updateScreenshotConfig` | 없음 — 어댑터는 스크린샷 기반(`ScreenshotBase`)을 상속하지 않는다                                                       |
+
+수정 없이 컴파일되지만 **결과·비용을 확인해야 하는 것** (실측 2026-10-13):
+
+- 무시되는 필터: `rslRsltNmL`, `rslRsltNmR`, `cptOfiOrgCd`, `sortCol`, `issLawitmYn`, `stDt`/`edDt`
+- `progressStatus` 어휘가 다름(NSM `발의`/`위원회 회부` ↔ likms `접수`/`소관위접수`/`소관위심사`/`소관위상정`/`본회의부의안건` — 실측)
+- `billName`에 발의자 괄호가 포함되고, `link`는 다른 호스트·경로 체계다
+- `ministry`/`progressDate`/`resolutionStatus`/`resolutionDate`는 빈 문자열
+- 기본 페이지 크기가 다르므로(20건 ↔ 50건) 페이지당 건수에 의존하면 `pageSize`를 명시한다
+- 총계가 다르다: 같은 조건에서 likms 15,950건 vs NSM 21,336건(실측) — `total`/페이지 수를 두 구현 사이에서 비교하면 안 된다
+- 제안일자 형식이 다르다: NSM은 `YYYYMMDD`(ISO로 주면 0건), likms는 `YYYY-MM-DD`이고 양쪽을 다 줘야 적용된다
+- `hydrateProposalReason`를 켠 채 어댑터를 쓰면 목록 조회마다 상세 요청이 붙는다(3건 실측 10.9s vs 2.1s) — 그 값은 `INsmBillItem`에 담기지 않는다
+
+> 결과의 `ministry`/`progressDate`/`resolutionStatus`/`resolutionDate`는 계류의안 목록에 없는 값이라 빈 문자열로 채워진다.
 
 ---
 
