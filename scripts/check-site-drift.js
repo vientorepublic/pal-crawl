@@ -29,6 +29,12 @@
  * 종료 코드: `0` = 전부 계약 유지, `1` = 계약 위반 있음, `2` = 계약 위반은 없고 확인 불가가 있음.
  * (계약 위반과 일시 장애를 구분해 알림이 오탐으로 소진되지 않게 한다.)
  *
+ * 일시 장애 대응: 계약 위반이 없는데 확인 불가(`error`)가 남으면 **지연 후 기본 1회
+ * 재점검**한다(`--retry`, `--retry-delay`). 재점검 결과는 판정 우선순위가 더 강할 때만
+ * 채택하므로(`STATUS_RANK`: drift > ok > error > skipped) 일시 장애는 회복되지만
+ * **드리프트는 재점검 성공으로 가려지지 않는다**. 이미 드리프트가 있으면(종료 코드 1)
+ * 사이트 부하를 늘리지 않도록 재점검하지 않는다.
+ *
  * 사용:
  *   npm run build
  *   node scripts/check-site-drift.js                        # 콘솔 요약
@@ -57,6 +63,8 @@ const PACKAGE_JSON = path.join(ROOT, 'package.json');
 const DEFAULT_DELAY_MS = 300;
 /** CI에서 오래 매달리지 않도록 재시도는 2회로 제한한다(라이브러리 기본값은 3회) */
 const REQUEST_CONFIG = { timeout: 20000, retryCount: 2 };
+/** 확인 불가(타임아웃 등)가 남았을 때 재점검까지 기다리는 기본 시간(ms) */
+const RETRY_DELAY_MS = 15000;
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
@@ -71,6 +79,8 @@ const HELP = `사용: node scripts/check-site-drift.js [옵션]
                       사용 가능: ${SITE_IDS}
   --delay <ms>        연속 요청 사이 지연 (기본 ${DEFAULT_DELAY_MS}ms)
   --offline           네트워크 점검을 건너뛴다(--self-test와 함께 쓸 때 편의용)
+  --retry <n>         확인 불가가 남았을 때 지연 후 재점검하는 횟수 (기본 1, 0이면 끔)
+  --retry-delay <ms>  재점검 전 대기 (기본 ${RETRY_DELAY_MS}ms)
   --self-test         네트워크 없이 검출·분류·리포트 로직 자체를 검증
   --contracts         계약 매니페스트와 src 소스가 어긋나지 않았는지 검증
   --help              이 도움말
@@ -82,6 +92,8 @@ function parseArgs(argv) {
     markdown: null,
     sites: null,
     delay: DEFAULT_DELAY_MS,
+    retry: 1,
+    retryDelay: RETRY_DELAY_MS,
     selfTest: false,
     contracts: false,
     offline: false,
@@ -114,6 +126,12 @@ function parseArgs(argv) {
       case '--delay':
         options.delay = Number.parseInt(next(), 10);
         break;
+      case '--retry':
+        options.retry = Number.parseInt(next(), 10);
+        break;
+      case '--retry-delay':
+        options.retryDelay = Number.parseInt(next(), 10);
+        break;
       case '--self-test':
         options.selfTest = true;
         break;
@@ -134,6 +152,12 @@ function parseArgs(argv) {
 
   if (!Number.isFinite(options.delay) || options.delay < 0) {
     throw new Error(`--delay 값이 올바르지 않습니다: ${options.delay}`);
+  }
+  if (!Number.isInteger(options.retry) || options.retry < 0) {
+    throw new Error(`--retry 값이 올바르지 않습니다: ${options.retry}`);
+  }
+  if (!Number.isFinite(options.retryDelay) || options.retryDelay < 0) {
+    throw new Error(`--retry-delay 값이 올바르지 않습니다: ${options.retryDelay}`);
   }
 
   return options;
@@ -536,6 +560,97 @@ class Checker {
     if (inconclusive > 0) return 2;
     return 0;
   }
+}
+
+/**
+ * 판정 우선순위 — 재점검 결과가 **더 강한** 판정일 때만 채택한다.
+ * 그래서 일시 장애(`error`)는 `ok`로 회복되지만, 드리프트(`drift`)는 재점검이
+ * 우연히 성공해도 가려지지 않는다(계약 위반을 놓치는 쪽이 더 큰 손실이다).
+ */
+const STATUS_RANK = { drift: 3, ok: 2, error: 1, skipped: 0 };
+
+/** 재점검을 하지 않았을 때의 기본 형태 */
+function emptyRetry(delayMs) {
+  return {
+    attempts: 0,
+    delayMs: delayMs ?? null,
+    sites: [],
+    checks: 0,
+    recovered: [],
+  };
+}
+
+/**
+ * 확인 불가(`error`)가 남은 사이트만 **지연 후 다시 점검**한다(기본 1회).
+ *
+ * 왜 사이트 단위로 다시 도는가: 점검은 앞 점검이 만든 컨텍스트(받은 HTML·파싱 결과)에
+ * 의존하므로 그 점검만 따로 다시 돌릴 수 없다. 대신 재점검 결과를 판정 우선순위로
+ * 병합해, 1차에서 통과한 항목은 낮은 판정으로 덮어쓰지 않는다.
+ *
+ * 어떤 예외도 밖으로 던지지 않는다 — 재점검이 이상해도 1차 판정과 리포트가 남아야 한다.
+ */
+async function retryInconclusive(
+  primary,
+  sites,
+  { attempts, delayMs, log = console.log },
+) {
+  const info = emptyRetry(delayMs);
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const affected = sites.filter((site) =>
+      primary.results.some(
+        (result) => result.site === site.id && result.status === 'error',
+      ),
+    );
+    if (affected.length === 0) {
+      break;
+    }
+
+    log(
+      `\n↻ 확인 불가 항목 재점검 ${attempt}/${attempts} — ${delayMs}ms 대기 후 ${affected
+        .map((site) => site.label)
+        .join(', ')}`,
+    );
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+
+    const retryChecker = new Checker(primary.delayMs);
+    for (const site of affected) {
+      await retryChecker.runSite(site);
+    }
+
+    info.attempts = attempt;
+    info.checks += retryChecker.results.length;
+    for (const site of affected) {
+      if (!info.sites.includes(site.id)) {
+        info.sites.push(site.id);
+      }
+    }
+
+    for (const retried of retryChecker.results) {
+      const current = primary.results.find(
+        (result) => result.id === retried.id,
+      );
+      if (current === undefined) {
+        continue;
+      }
+      current.retried = true;
+      if (STATUS_RANK[retried.status] > STATUS_RANK[current.status]) {
+        info.recovered.push({
+          id: current.id,
+          from: current.status,
+          to: retried.status,
+        });
+        current.previousStatus = current.status;
+        current.status = retried.status;
+        current.detail = retried.detail;
+        current.ms = retried.ms;
+      }
+    }
+  }
+
+  return info;
 }
 
 // ─── 요청 op (사이트마다 다른 호출 한 줄) ────────────────────────────────────
@@ -1136,6 +1251,96 @@ async function runSelfTest() {
     failures.push(`확인 불가만 있을 때 exitCode: 기대 2, 실제 ${errorOnly.exitCode}`);
   }
 
+  // 일시 장애 재점검: 회복은 되지만 드리프트는 재점검 성공으로 가려지지 않아야 한다
+  const retryPrimary = new Checker(0);
+  let flakyCalls = 0;
+  let driftThenOkCalls = 0;
+  const timeoutError = () => new Error('Request timeout after 20000ms');
+  const retrySite = {
+    id: 'self/retry',
+    label: '재점검 사이트',
+    checks: [
+      {
+        id: 'self/retry-recovers',
+        label: '첫 시도 확인 불가 → 재점검 성공',
+        run: () => {
+          flakyCalls += 1;
+          if (flakyCalls === 1) {
+            throw timeoutError();
+          }
+          return '재점검에서 회복';
+        },
+      },
+      {
+        id: 'self/retry-stays',
+        label: '재점검에서도 확인 불가',
+        run: () => {
+          throw timeoutError();
+        },
+      },
+      {
+        id: 'self/retry-guards-drift',
+        label: '드리프트는 재점검 성공으로 가려지지 않는다',
+        run: () => {
+          driftThenOkCalls += 1;
+          if (driftThenOkCalls === 1) {
+            throw new DriftError('선택자 소실 → td.td_block > a.board_subject');
+          }
+          return '재점검에서는 선택자가 보임';
+        },
+      },
+    ],
+  };
+  await retryPrimary.runSite(retrySite);
+  const retryInfo = await retryInconclusive(retryPrimary, [retrySite], {
+    attempts: 1,
+    delayMs: 0,
+    log: () => {},
+  });
+  const retryById = Object.fromEntries(
+    retryPrimary.results.map((result) => [result.id, result]),
+  );
+  if (
+    retryById['self/retry-recovers'].status !== 'ok' ||
+    retryById['self/retry-recovers'].previousStatus !== 'error'
+  ) {
+    failures.push(
+      `재점검 회복: 기대 error→ok, 실제 ${retryById['self/retry-recovers'].status}`,
+    );
+  }
+  if (
+    retryById['self/retry-stays'].status !== 'error' ||
+    retryById['self/retry-stays'].retried !== true
+  ) {
+    failures.push(
+      `재점검 후 잔여 확인 불가: 기대 error+재점검 표시, 실제 ${retryById['self/retry-stays'].status}`,
+    );
+  }
+  if (retryById['self/retry-guards-drift'].status !== 'drift') {
+    failures.push(
+      `재점검이 드리프트를 가렸습니다: 실제 ${retryById['self/retry-guards-drift'].status}`,
+    );
+  }
+  if (retryInfo.attempts !== 1 || retryInfo.recovered.length !== 1) {
+    failures.push(
+      `재점검 집계: attempts=${retryInfo.attempts} recovered=${retryInfo.recovered.length}`,
+    );
+  }
+  const retryReport = buildReport(retryPrimary.results, {
+    startedAt: new Date(),
+    retry: retryInfo,
+  });
+  const retryMarkdown = renderMarkdown(retryReport, { title: 'self-test' });
+  if (
+    !retryMarkdown.includes('재점검:') ||
+    !retryMarkdown.includes('재점검에서 판정 변경')
+  ) {
+    failures.push('재점검 정보가 Markdown 리포트에 없습니다');
+  }
+  if (retryReport.retry.attempts !== 1) {
+    failures.push('재점검 정보가 JSON 리포트에 없습니다');
+  }
+
   // 리포트 렌더링이 검출 결과를 담고 있는지
   const report = buildReport(checker.results, { startedAt: new Date() });
   const markdown = renderMarkdown(report, { title: 'self-test' });
@@ -1179,7 +1384,7 @@ async function runSelfTest() {
   }
 
   console.log(
-    `\n${SELF_TEST_CASES.length + 4 - failures.length}/${SELF_TEST_CASES.length + 4} self-test 항목 통과`,
+    `\n${SELF_TEST_CASES.length + 5 - failures.length}/${SELF_TEST_CASES.length + 5} self-test 항목 통과`,
   );
   if (failures.length > 0) {
     console.error('self-test 실패:');
@@ -1202,7 +1407,7 @@ const truncate = (text, limit) =>
 
 function buildReport(
   results,
-  { startedAt, exitCode, libraryVersion, durationMs, runUrl },
+  { startedAt, exitCode, libraryVersion, durationMs, runUrl, retry },
 ) {
   const groupBySite = new Map();
   for (const result of results) {
@@ -1228,6 +1433,9 @@ function buildReport(
         status: check.status,
         detail: truncate(check.detail, 500),
         ms: check.ms,
+        // 일시 장애 재점검으로 판정이 바뀌었는지(리포트에서 "(재점검)"으로 보인다)
+        retried: check.retried === true,
+        previousStatus: check.previousStatus ?? null,
       })),
     };
   });
@@ -1249,6 +1457,8 @@ function buildReport(
     libraryVersion: libraryVersion ?? null,
     exitCode: exitCode ?? (counts.drift > 0 ? 1 : counts.inconclusive > 0 ? 2 : 0),
     summary: counts,
+    // 확인 불가가 남아 지연 후 다시 점검한 기록(없으면 attempts=0)
+    retry: retry ?? emptyRetry(null),
     sites,
     drift: results
       .filter((result) => result.status === 'drift')
@@ -1310,6 +1520,12 @@ function renderMarkdown(report, { title } = {}) {
           : '✅ 계약 유지 (파서가 기대하는 계약이 실사이트에 그대로 있음)'
     } — 점검 ${summary.checks}건 (계약 유지 ${summary.ok} · 확인 불가 ${summary.inconclusive} · 건너뜀 ${summary.skipped})`,
   );
+  const retry = report.retry ?? emptyRetry(null);
+  if (retry.attempts > 0) {
+    lines.push(
+      `- 재점검: 확인 불가 항목을 지연 ${retry.delayMs}ms 두고 ${retry.attempts}회 다시 점검 — 판정 변경 ${retry.recovered.length}건`,
+    );
+  }
   lines.push('');
 
   for (const site of report.sites) {
@@ -1318,8 +1534,24 @@ function renderMarkdown(report, { title } = {}) {
     lines.push('| 점검 | 결과 | 비고 |');
     lines.push('|------|------|------|');
     for (const check of site.checks) {
+      const retryNote = check.previousStatus
+        ? ` · 재점검에서 판정 변경(${STATUS_LABEL[check.previousStatus] ?? check.previousStatus} → ${STATUS_LABEL[check.status] ?? check.status})`
+        : check.retried
+          ? ' · 재점검함'
+          : '';
       lines.push(
-        `| \`${check.id}\` ${check.label} | ${STATUS_ICON[check.status] ?? ''} ${STATUS_LABEL[check.status] ?? check.status} | ${check.detail.replace(/\|/g, '\\|')} |`,
+        `| \`${check.id}\` ${check.label} | ${STATUS_ICON[check.status] ?? ''} ${STATUS_LABEL[check.status] ?? check.status} | ${check.detail.replace(/\|/g, '\\|')}${retryNote} |`,
+      );
+    }
+    lines.push('');
+  }
+
+  if (retry.recovered.length > 0) {
+    lines.push('### 재점검에서 판정이 바뀐 항목 (일시 장애 회복)');
+    lines.push('');
+    for (const item of retry.recovered) {
+      lines.push(
+        `- **\`${item.id}\`**: ${STATUS_LABEL[item.from] ?? item.from} → ${STATUS_LABEL[item.to] ?? item.to}`,
       );
     }
     lines.push('');
@@ -1383,7 +1615,7 @@ async function runLive(options, lib) {
     }
   }
 
-  return checker;
+  return { checker, sites };
 }
 
 (async () => {
@@ -1451,14 +1683,31 @@ async function runLive(options, lib) {
       ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
       : null;
 
-  let checker;
+  let live;
   try {
-    checker = await runLive(options, lib);
+    live = await runLive(options, lib);
   } catch (error) {
     // 사이트 지정 오류 등 시작 단계 실패 — 리포트를 만들 수 없으므로 확인 불가(2)로 끝낸다.
     console.error(messageOf(error));
     process.exit(2);
     return;
+  }
+
+  const { checker, sites } = live;
+
+  // 일시 장애(확인 불가)는 지연 후 재점검한다 — 드리프트가 이미 있으면 실패가 확정이므로
+  // 사이트 부하를 늘리지 않도록 재점검하지 않는다.
+  let retry = emptyRetry(options.retryDelay);
+  if (options.retry > 0 && checker.exitCode === 2) {
+    retry = await retryInconclusive(checker, sites, {
+      attempts: options.retry,
+      delayMs: options.retryDelay,
+    });
+    if (retry.attempts > 0) {
+      console.log(
+        `  재점검 결과: 판정 변경 ${retry.recovered.length}건 · 남은 확인 불가 ${checker.counts.inconclusive}건`,
+      );
+    }
   }
 
   const report = buildReport(checker.results, {
@@ -1467,6 +1716,7 @@ async function runLive(options, lib) {
     libraryVersion,
     durationMs: Date.now() - startedAt.getTime(),
     runUrl,
+    retry,
   });
 
   if (options.markdown) {
@@ -1491,6 +1741,11 @@ async function runLive(options, lib) {
   console.log(
     `\n점검 ${summary.checks}건 · 계약 유지 ${summary.ok} · 계약 위반 ${summary.drift} · 확인 불가 ${summary.inconclusive} · 건너뜀 ${summary.skipped}`,
   );
+  if (report.retry.attempts > 0) {
+    console.log(
+      `재점검 ${report.retry.attempts}회 (대기 ${report.retry.delayMs}ms · ${report.retry.sites.join(', ')}) — 판정 변경 ${report.retry.recovered.length}건`,
+    );
+  }
   console.log(
     report.exitCode === 0
       ? '결과: 계약 유지 ✅ (크롤러 계약이 실사이트에서 그대로입니다)'

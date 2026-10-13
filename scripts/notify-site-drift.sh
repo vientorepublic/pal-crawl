@@ -4,6 +4,8 @@
 #
 # 24시간 주기 점검(`.github/workflows/site-drift.yml`)이 남긴 JSON 리포트를 읽어
 # GitHub 이슈로 알린다(같은 주제의 열린 이슈가 있으면 코멘트로 잇는다).
+# 확인 불가(타임아웃 등)는 검증기가 판정 전에 지연 후 1회 재점검하며, 그 기록은
+# 리포트의 `retry`에 있다 — 본문·웹훅은 재점검 후에도 남은 확인 불가만 보고한다.
 # 선택적으로 `DRIFT_WEBHOOK_URL`(Slack/Discord/Teams/Google Chat 등)로도 보낸다.
 #
 # 사용:
@@ -67,6 +69,7 @@ build_issue_body() {
   # 쉼표와 `empty`로 흘려보내는 형태로만 조립한다.
   jq -r --arg mode "${MODE}" '
     ($mode) as $m
+    | (.retry.attempts // 0) as $retried
     | [
         (if $m == "drift"
            then "## ❌ 크롤러 계약 위반 — 실사이트 응답이 파서의 기대와 다릅니다"
@@ -80,6 +83,9 @@ build_issue_body() {
         "- 점검 시각: `\(.checkedAtKst // .checkedAt)`",
         "- pal-crawl 버전: `\(.libraryVersion)`",
         "- 점검 결과: 점검 \(.summary.checks)건 · 계약 유지 \(.summary.ok) · 계약 위반 \(.summary.drift) · 확인 불가 \(.summary.inconclusive) · 건너뜀 \(.summary.skipped)",
+        (if $retried > 0
+           then "- 재점검: 확인 불가 항목을 지연 \(.retry.delayMs)ms 두고 \(.retry.attempts)회 다시 점검 — 판정 변경 \(.retry.recovered | length)건"
+           else empty end),
         (if .runUrl then "- 실행 로그: \(.runUrl)" else empty end),
         (if .summary.skipped > 0
            then "- ⚠️ 선행 점검 실패로 건너뛴 항목 \(.summary.skipped)건 — 점검 범위가 줄었습니다(리포트 참조)."
@@ -91,7 +97,10 @@ build_issue_body() {
         (.drift[]? | "- **`\(.id)`** — \(.label): \(.detail)"),
         (if (.drift | length) > 0 then "" else empty end),
         (if (.inconclusive | length) > 0
-           then "### 확인 불가(사이트 변경인지 일시 장애인지 미확정)", ""
+           then (if $retried > 0
+                   then "### 확인 불가 — 지연 재점검 후에도 확인되지 않음(사이트 변경인지 일시 장애인지 미확정)"
+                   else "### 확인 불가(사이트 변경인지 일시 장애인지 미확정)"
+                 end), ""
            else empty end),
         (.inconclusive[]? | "- **`\(.id)`** — \(.label): \(.detail)"),
         (if (.inconclusive | length) > 0 then "" else empty end),
@@ -120,6 +129,9 @@ build_webhook_text() {
          else "✅ pal-crawl 크롤러 계약 복구"
          end),
         "계약 위반 \(.summary.drift)건 · 확인 불가 \(.summary.inconclusive)건 (점검 \(.summary.checks)건, \(.checkedAtKst))",
+        (if (.retry.attempts // 0) > 0
+           then "재점검 \(.retry.attempts)회(대기 \(.retry.delayMs)ms) — 판정 변경 \(.retry.recovered | length)건"
+           else empty end),
         (.drift[]? | "• \(.id): \(.detail)"),
         (.inconclusive[]? | "• \(.id): \(.detail)"),
         (if .runUrl then "로그: \(.runUrl)" else empty end)
