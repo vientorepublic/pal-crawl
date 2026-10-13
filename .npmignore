@@ -1,7 +1,11 @@
 src/
 !/dist/**
+# 컴파일된 테스트 산출물(사이트 HTML 픽스처 포함)은 패키지에 싣지 않는다
+dist/*.test.*
 scripts/
 .github/
 drift-report/
 coverage/
 agent_memories/
+# 에이전트 상태 파일
+.freebuff/
