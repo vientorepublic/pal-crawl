@@ -32,7 +32,8 @@ src/
   likms.ts        # LikmsCrawler
   *.test.ts       # 테스트는 소스와 동봉 (별도 test/ 디렉터리 없음)
 agent_memories/    # 에이전트 공유 메모리 (README.md = 형식 규칙, INDEX.md = 진입점)
-.github/workflows/  # test.yml, build.yml, contract-live.yml (PR → main), site-drift.yml (매일 06:00 KST)
+.github/workflows/  # test.yml·build.yml·contract-live.yml(PR → main), site-drift.yml(매일 06:00 KST)
+                    #   표시 이름: Test · Build · Contract check (pull requests) · Contract check (daily)
 ```
 
 **설계 원칙**: 네트워크 담당(크롤러 클래스)과 HTML 파싱 담당(파서 클래스)을 분리한다.
@@ -269,10 +270,13 @@ gh api ...                      # 없는 API는 gh api로 직접 호출
    병합 전 필수이고, dev 대상 PR에서는 로컬 검증이 유일한 방어선이므로 생략 금지.
 3. **`main`은 보호 브랜치다** — 필수 상태 체크 `test` · `build` · `contract-live`가 모두
    성공해야 병합된다(`strict: true`라 최신 `main` 기준 재검증이 필요하고, `enforce_admins`는
-   꺼져 있어 긴급 시 admin은 우회할 수 있다). `contract-live`는 PR마다 실사이트 계약
-   18건을 점검하므로 **드리프트가 있으면 병합이 막힌다** — 사이트 구조가 바뀐 PR은
-   `scripts/drift-contracts`의 계약을 같은 PR에서 함께 고친다. 확인 불가(종료 코드 2:
-   타임아웃 등)는 경고에 그치고 병합을 막지 않는다 (`.github/workflows/contract-live.yml`).
+   꺼져 있어 긴급 시 admin은 우회할 수 있다). `contract-live`(`Contract check (pull requests)`)는
+   PR마다 **크롤러 계약 검증** — 실사이트 응답이 파서가 기대하는 계약(선택자·엔드포인트·
+   응답 필드)과 그대로인지 18건을 점검하므로 **계약이 깨져 있으면 병합이 막힌다**.
+   사이트 구조가 바뀐 PR은 `scripts/drift-contracts`의 계약을 같은 PR에서 함께 고친다.
+   확인 불가(종료 코드 2: 타임아웃 등)는 경고에 그치고 병합을 막지 않는다
+   (`.github/workflows/contract-live.yml`). 정기 점검은 같은 이름 규칙으로
+   `Contract check (daily)`(06:00 KST)이며, 이슈는 `crawler-contract` 라벨로 만든다.
    필수 체크 이름은 워크플로 잡 id이므로 **워크플로 간에 겹치면 안 된다**(예: `build.yml`의 잡은 `build`).
 4. PR 본문에 변경 유형(feat/fix/…)과 영향받는 사이트/파서를 명시.
 5. Renovate PR: 자동 브랜치이며 베이스는 `dev` (renovate.json 설정 — 피처는 main이 대상이어도 Renovate만 dev는 유지).

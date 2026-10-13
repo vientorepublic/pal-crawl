@@ -2,7 +2,8 @@
 'use strict';
 
 /**
- * scripts/check-site-drift.js — 대상 사이트 3곳의 **구조 드리프트**를 탐지한다.
+ * scripts/check-site-drift.js — 대상 사이트 3곳의 **크롤러 계약**이 실사이트에서
+ * 그대로인지 검증한다(계약이 깨지면 파서가 조용히 빈 값을 돌려주는 회귀가 된다).
  *
  * 배경: 이 라이브러리는 세 사이트의 HTML 선택자와 AJAX 흐름(엔드포인트·파라미터·
  * CSRF 헤더)에 의존한다. 그런데 파서는 프로젝트 규약상 **절대 예외를 던지지 않는다**
@@ -19,13 +20,14 @@
  * 남긴다. 파서를 고치면 매니페스트도 같은 PR에서 고쳐야 한다:
  * `npm run drift:contracts`가 매니페스트 ↔ `src/` 대조를 강제한다.
  *
- * 판정 3종:
- * - `ok`    : 계약 유지
- * - `drift` : **사이트가 바뀐 것**(선택자·엔드포인트·응답 필드의 소실/개명, 4xx·5xx)
- * - `error` : 확인 불가(타임아웃·DNS·연결 오류) — 사이트 변경인지 일시 장애인지 단정 못 함
+ * 판정 3종 — 상태 값(`ok`/`drift`/`error`)은 JSON·코드에서 그대로 쓰고,
+ * 사람에게 보이는 라벨만 한국어로 바꾼다(`STATUS_LABEL`).
+ * - `ok`    : **계약 유지** — 파서가 기대하는 선택자·엔드포인트·필드가 실사이트에 살아 있음
+ * - `drift` : **계약 위반**(사이트가 바뀐 것 — 선택자·엔드포인트·응답 필드의 소실/개명, 4xx·5xx)
+ * - `error` : **확인 불가**(타임아웃·DNS·연결 오류) — 사이트 변경인지 일시 장애인지 단정 못 함
  *
- * 종료 코드: `0` = 전부 ok, `1` = drift 있음, `2` = drift는 없고 확인 불가가 있음.
- * (드리프트와 일시 장애를 구분해 알림이 오탐으로 소진되지 않게 한다.)
+ * 종료 코드: `0` = 전부 계약 유지, `1` = 계약 위반 있음, `2` = 계약 위반은 없고 확인 불가가 있음.
+ * (계약 위반과 일시 장애를 구분해 알림이 오탐으로 소진되지 않게 한다.)
  *
  * 사용:
  *   npm run build
@@ -1274,6 +1276,14 @@ const STATUS_ICON = {
   skipped: '⏭️',
 };
 
+/** 상태 값(JSON·코드) → 사람에게 보이는 라벨(계약 관점으로 읽히게 한다) */
+const STATUS_LABEL = {
+  ok: '계약 유지',
+  drift: '계약 위반',
+  error: '확인 불가',
+  skipped: '건너뜀',
+};
+
 /** 점검 시각을 KST로도 보여준다(대상 사이트가 국내 시스템) */
 function toKstString(isoString) {
   const kst = new Date(new Date(isoString).getTime() + 9 * 60 * 60 * 1000);
@@ -1284,7 +1294,7 @@ function renderMarkdown(report, { title } = {}) {
   const { summary } = report;
   const lines = [];
 
-  lines.push(`## ${title ?? '사이트 드리프트 점검'} 결과`);
+  lines.push(`## ${title ?? '크롤러 계약 검증'} 결과`);
   lines.push('');
   lines.push(`- 점검 시각: \`${report.checkedAtKst}\``);
   lines.push(`- pal-crawl 버전: \`${report.libraryVersion ?? 'unknown'}\``);
@@ -1294,11 +1304,11 @@ function renderMarkdown(report, { title } = {}) {
   lines.push(
     `- 결과: ${
       summary.drift > 0
-        ? `❌ **드리프트 ${summary.drift}건**`
+        ? `❌ **계약 위반 ${summary.drift}건** — 실사이트 응답이 파서의 기대와 다릅니다`
         : summary.inconclusive > 0
-          ? `⚠️ 확인 불가 ${summary.inconclusive}건 (드리프트 없음)`
-          : '✅ 계약 유지 (드리프트 없음)'
-    } — 점검 ${summary.checks}건 (정상 ${summary.ok} · 확인 불가 ${summary.inconclusive} · 건너뜀 ${summary.skipped})`,
+          ? `⚠️ 확인 불가 ${summary.inconclusive}건 (계약 위반 없음)`
+          : '✅ 계약 유지 (파서가 기대하는 계약이 실사이트에 그대로 있음)'
+    } — 점검 ${summary.checks}건 (계약 유지 ${summary.ok} · 확인 불가 ${summary.inconclusive} · 건너뜀 ${summary.skipped})`,
   );
   lines.push('');
 
@@ -1309,14 +1319,14 @@ function renderMarkdown(report, { title } = {}) {
     lines.push('|------|------|------|');
     for (const check of site.checks) {
       lines.push(
-        `| \`${check.id}\` ${check.label} | ${STATUS_ICON[check.status] ?? ''} ${check.status} | ${check.detail.replace(/\|/g, '\\|')} |`,
+        `| \`${check.id}\` ${check.label} | ${STATUS_ICON[check.status] ?? ''} ${STATUS_LABEL[check.status] ?? check.status} | ${check.detail.replace(/\|/g, '\\|')} |`,
       );
     }
     lines.push('');
   }
 
   if (report.drift.length > 0) {
-    lines.push('### 드리프트 상세');
+    lines.push('### 계약 위반 상세 — 사이트 응답이 코드의 기대와 다름');
     lines.push('');
     for (const item of report.drift) {
       lines.push(`- **${item.site} / ${item.id}** (${item.label}): ${item.detail}`);
@@ -1368,7 +1378,7 @@ async function runLive(options, lib) {
     )) {
       const icon = STATUS_ICON[result.status] ?? '';
       console.log(
-        `  ${icon} [${result.status}] ${result.id} — ${result.detail} (${result.ms}ms)`,
+        `  ${icon} [${STATUS_LABEL[result.status] ?? result.status}] ${result.id} — ${result.detail} (${result.ms}ms)`,
       );
     }
   }
@@ -1426,7 +1436,7 @@ async function runLive(options, lib) {
   ).version;
 
   const startedAt = new Date();
-  console.log('pal-crawl 사이트 드리프트 점검');
+  console.log('pal-crawl 크롤러 계약 검증 — 실사이트 응답을 파서의 계약과 대조');
   console.log(`  entry: ${DIST_ENTRY} (pal-crawl ${libraryVersion})`);
   console.log(
     `  계약: scripts/drift-contracts (사이트 ${manifest.SITES.length}곳 · 점검 ${
@@ -1465,7 +1475,7 @@ async function runLive(options, lib) {
     });
     fs.writeFileSync(
       options.markdown,
-      renderMarkdown(report, { title: '사이트 드리프트 점검' }),
+      renderMarkdown(report, { title: '크롤러 계약 검증' }),
       'utf8',
     );
     console.log(`\nMarkdown 리포트: ${options.markdown}`);
@@ -1479,14 +1489,14 @@ async function runLive(options, lib) {
 
   const { summary } = report;
   console.log(
-    `\n점검 ${summary.checks}건 · 정상 ${summary.ok} · 드리프트 ${summary.drift} · 확인 불가 ${summary.inconclusive} · 건너뜀 ${summary.skipped}`,
+    `\n점검 ${summary.checks}건 · 계약 유지 ${summary.ok} · 계약 위반 ${summary.drift} · 확인 불가 ${summary.inconclusive} · 건너뜀 ${summary.skipped}`,
   );
   console.log(
     report.exitCode === 0
-      ? '결과: 계약 유지 ✅'
+      ? '결과: 계약 유지 ✅ (크롤러 계약이 실사이트에서 그대로입니다)'
       : report.exitCode === 1
-        ? '결과: 드리프트 감지 ❌ (사이트 구조·엔드포인트 확인 필요)'
-        : '결과: 확인 불가 ⚠️ (네트워크/타임아웃 — 사이트 변경 여부 미확정)',
+        ? '결과: 계약 위반 ❌ (실사이트 응답이 계약과 다름 — 파서·계약 확인 필요)'
+        : '결과: 확인 불가 ⚠️ (네트워크/타임아웃 — 계약 위반 여부 미확정)',
   );
 
   process.exit(report.exitCode);

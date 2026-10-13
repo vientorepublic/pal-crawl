@@ -1,8 +1,9 @@
-# 사이트 드리프트 계약 매니페스트
+# 크롤러 계약 매니페스트
 
 대상 사이트 3곳(PAL·NSM·LIKMS)과 교차 점검이 기대하는 **DOM 선택자·AJAX 엔드포인트·
 검색 필터·파싱 결과 필드 형식**을 데이터로 선언한 곳이다. 실행기는
-`scripts/check-site-drift.js`(매일 06:00 KST GitHub Actions)이고, 여기 파일은
+`scripts/check-site-drift.js`이고, 매일 06:00 KST `Contract check (daily)`와
+PR마다 `Contract check (pull requests)`가 이 계약을 실사이트와 대조한다. 여기 파일은
 `src/`의 파서·크롤러와 **같은 PR에서** 고친다.
 
 | 파일 | 대상 |
