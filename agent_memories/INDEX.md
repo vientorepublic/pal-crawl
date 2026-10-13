@@ -7,6 +7,9 @@
 
 | id | type | title | status | updated |
 |----|------|-------|--------|---------|
+| [2026-10-14-release-v2.3.0](tasks/2026-10-14-release-v2.3.0.md) | task | v2.3.0 릴리스 실행 — 공개 API d.ts 대조로 minor 판단, main·태그·릴리스 완료 / 게시는 2FA(OTP)로 보류 | active | 2026-10-14 |
+| [2026-10-14-npm-publish-otp](findings/2026-10-14-npm-publish-otp.md) | finding | npm 게시는 계정 2FA(OTP)를 요구한다 — 토큰 갱신만으로는 게시할 수 없다 | active | 2026-10-14 |
+| [2026-10-14-npm-package-test-artifacts](findings/2026-10-14-npm-package-test-artifacts.md) | finding | 게시 tarball에 컴파일된 테스트 산출물과 .freebuff 상태 파일이 실린다 | active | 2026-10-14 |
 | [2026-10-14-inconclusive-retry](decisions/2026-10-14-inconclusive-retry.md) | decision | 확인 불가(타임아웃)는 지연 후 1회 재점검하고 판정 우선순위로 병합한다(드리프트는 가려지지 않음) | active | 2026-10-14 |
 | [2026-10-14-contract-verification-wording](decisions/2026-10-14-contract-verification-wording.md) | decision | 사람에게 보이는 이름을 "사이트 드리프트"에서 "크롤러 계약 검증"으로 통일하고 내부 식별자는 유지한다 | active | 2026-10-14 |
 | [2026-10-14-pr-contract-merge-gate](decisions/2026-10-14-pr-contract-merge-gate.md) | decision | PR마다 실사이트 계약을 점검해 main 필수 상태 체크로 묶고, 드리프트 시 병합을 차단한다 | active | 2026-10-14 |
@@ -39,6 +42,7 @@
 
 ## 최근 활동
 
+- 2026-10-14: **v2.3.0 릴리스 실행 — 게시만 2FA로 보류** — 이 세션의 변경(상임위 이름→소관위 코드 매핑, likms `cmtResultCd`/`jntPrpslYn` 노출)을 포함한 main을 대상으로 게이트 재실행(250 passed/11 skipped, `verify:dist` 17/17 · `--live` 27/27) → 버전 판단은 **minor(2.2.1→2.3.0)**: `v2.2.1..main`에 `feat:` 2건 + 파괴 변경 없음. 파괴 여부는 v2.2.1 워크트리를 빌드해 `dist/*.d.ts`를 대조하는 방식으로 확정(제거 0·변경 0). `chore/release-v2.3.0` → PR #97(버전 3줄, CI test/build/contract-live pass) → merge `32a5d3a` → 태그 `v2.3.0` → GitHub 릴리스. **`npm publish`는 `EOTP`(2FA one-time password)로 실패**해 registry 최신은 2.2.1 그대로다. 게시물 위생 결함(컴파일된 테스트 산출물 6→12개·`.freebuff/project-id` 포함)은 `.npmignore`로 별도 정리.
 - 2026-10-14: **일시 장애 재점검 도입** — 계약 위반 없이 확인 불가(타임아웃)가 남으면 검증기가 지연 후 1회(기본 15초, `--retry`/`--retry-delay`) 확인 불가가 난 사이트를 다시 점검하고, 판정 우선순위(`drift` > `ok` > `error` > `skipped`)로 병합한다 — 일시 장애는 회복되지만 **드리프트는 재점검 성공으로 가려지지 않는다**. 드리프트가 이미 있으면 재점검하지 않는다(실패가 확정인데 사이트 부하만 늘리므로). 기록은 리포트의 `retry`·점검별 `retried`/`previousStatus`에 남고 콘솔·Markdown·이슈 본문·웹훅이 보여준다. `--self-test`에 회복·잔여 확인 불가·드리프트 보존·렌더링 검증을 추가(12/12). 실측 중 별개 결함도 확인: `HttpClient`는 `retryCount: 0`이면 `undefined`를 던진다(`src/http-client.ts:243`).
 - 2026-10-14: **용어 통일 — "사이트 드리프트" → "크롤러 계약 검증"** — 워크플로 이름(`Contract check (pull requests)` / `Contract check (daily)`), 콘솔 배너·요약, Markdown 리포트, 이슈 제목·라벨(`crawler-contract`), 웹훅 제목, 아티팩트명(`contract-check-report`)을 계약 관점으로 바꿔 "무엇을 확인하는지"가 제목만 봐도 읽히게 했다. 상태 라벨도 `드리프트 감지` → `계약 위반`, `정상` → `계약 유지`. 파일명·npm 스크립트(`drift:*`)·`DRIFT_*` 환경변수·JSON 상태 값은 기계 계약이라 그대로 두었다(이유는 decision 레코드에).
 - 2026-10-14: **PR 시점 계약 검증 + main 필수 상태 체크로 병합 차단** — `contract-live.yml`(PR→main에서 실사이트 계약을 확인, 드리프트만 실패로 처리하고 확인 불가는 경고 후 통과)을 추가하고, 리포트 경로를 `.drift/`에서 `drift-report/`로 옮겨 아티팩트 업로드 결함을 함께 고쳤다. Build 워크플로 job id를 `build`로 바꿔 상태 체크 이름(`test`/`build`/`contract-live`)이 겹치지 않게 했다. 보호 규칙에는 필수 체크 3개(app 15368)와 `strict: true`를 걸었고, 네거티브 실측으로 확인: 실사이트에 없는 선택자를 단언한 임시 PR에서 `contract-live`만 FAILURE → `mergeStateStatus=BLOCKED`(녹색 PR은 `CLEAN`). `BLOCKED`는 체크 누락과 실패를 구분하지 않아 실측은 게이트를 추가한 브랜치에서 파생해야 했다.
