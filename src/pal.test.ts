@@ -1,36 +1,33 @@
+import { URL } from 'url';
+import https from 'https';
+import { Config } from './config';
 import {
-  ITableData,
-  ISearchResult,
+  type ISearchResult,
   PalCrawl,
   NsmLmSts,
   type PalCrawlConfig,
   type INsmSearchResult,
-  type INsmBillItem,
 } from './pal';
 import { PalParser, NsmLmStsParser } from './parser';
 
-const DEFAULT_TEST_TIMEOUT_MS = 120000;
-const configuredTimeout = Number.parseInt(
-  process.env.PAL_CRAWL_TEST_TIMEOUT_MS ?? String(DEFAULT_TEST_TIMEOUT_MS),
-  10,
-);
-const testTimeoutMs =
-  Number.isFinite(configuredTimeout) && configuredTimeout > 0
-    ? configuredTimeout
-    : DEFAULT_TEST_TIMEOUT_MS;
+// Fail immediately if a fixture test accidentally reaches the real transport.
+beforeEach(() => {
+  jest.spyOn(https, 'request').mockImplementation(() => {
+    throw new Error('Unexpected external request in offline tests');
+  });
+});
+afterEach(() => jest.restoreAllMocks());
 
-// Integration tests call external services and can be slow on unstable networks.
-jest.setTimeout(testTimeoutMs);
-
-const FIXED_ONGOING_CONTENT_ID = 'PRC_W2W6V0D4D0B9C1B4B4Z6V2W0U7V2T9';
-const FIXED_DONE_CONTENT_ID = 'PRC_S2R6N0M3K2J3K1J5K3S8R3P4O3P5X6';
-
-const SHOULD_DEBUG = process.env.PAL_CRAWL_TEST_DEBUG === '1';
-
-const debugLog = (label: string, value: unknown): void => {
-  if (!SHOULD_DEBUG) return;
-  console.debug(label, JSON.stringify(value, null, 2));
-};
+const getHttpClient = (
+  instance: PalCrawl | NsmLmSts,
+): {
+  get: (url: URL) => Promise<string>;
+} =>
+  (
+    instance as unknown as {
+      httpClient: { get: (url: URL) => Promise<string> };
+    }
+  ).httpClient;
 
 // ─── HTML Fixtures ────────────────────────────────────────────────────────────
 
@@ -311,6 +308,23 @@ describe('PalParser', () => {
   const parser = new PalParser();
 
   describe('parseTable', () => {
+    test('returns zero for malformed numeric fields', () => {
+      const html = TABLE_ROW_HTML.replace(
+        '<td>42</td>',
+        '<td>unknown</td>',
+      ).replace('1,234', 'unknown');
+      const [row] = parser.parseTable(html);
+      expect(row.num).toBe(0);
+      expect(row.numComments).toBe(0);
+    });
+
+    test('parses multiple thousands separators in comment counts', () => {
+      const [row] = parser.parseTable(
+        TABLE_ROW_HTML.replace('1,234', '1,234,567'),
+      );
+      expect(row.numComments).toBe(1234567);
+    });
+
     test('returns [] for invalid html', () => {
       expect(parser.parseTable('asdf')).toHaveLength(0);
     });
@@ -438,6 +452,16 @@ describe('PalParser', () => {
     });
   });
   describe('parseSearchResult', () => {
+    test('returns zero when the reported total is malformed', () => {
+      const result = parser.parseSearchResult(
+        SEARCH_RESULT_HTML.replace(
+          '<strong>143</strong>',
+          '<strong>unknown</strong>',
+        ),
+      );
+      expect(result.total).toBe(0);
+    });
+
     test('parses total, totalPages, currentPage, and items from fixture', () => {
       const result = parser.parseSearchResult(SEARCH_RESULT_HTML);
       expect(result.total).toBe(143);
@@ -536,315 +560,133 @@ describe('PalCrawl', () => {
     });
   });
 
-  // ── ongoing legislative notices (integration) ────────────────────────────────
+  describe('fixture-backed requests', () => {
+    let mockGet: jest.SpyInstance<Promise<string>, [URL]>;
 
-  describe('ongoing legislative notices', () => {
-    let listHtml = '';
-    let ongoingTable: ITableData[] = [];
-    let contentHtml = '';
-    let fixedContent: Awaited<ReturnType<PalCrawl['getContent']>>;
-
-    beforeAll(async () => {
-      [listHtml, contentHtml] = await Promise.all([
-        palCrawl.getPalHTML(),
-        palCrawl.getContentHTML(FIXED_ONGOING_CONTENT_ID),
-      ]);
-      ongoingTable = palCrawl.parseTable(listHtml);
-      fixedContent = palCrawl.parseContent(contentHtml);
-      debugLog('ongoingTable', ongoingTable);
-      debugLog('fixedContent', fixedContent);
+    beforeEach(() => {
+      mockGet = jest.spyOn(getHttpClient(palCrawl), 'get');
     });
 
-    test('getPalHTML: returns a non-garbled html string', () => {
-      expect(typeof listHtml).toBe('string');
-      expect(listHtml.length).toBeGreaterThan(0);
-      expect(listHtml).not.toContain('�');
+    test.each([
+      ['ongoing', Config.LIST_URL],
+      ['done', Config.DONE_LIST_URL],
+    ])('requests and parses the %s notice list', async (kind, path) => {
+      mockGet.mockResolvedValue(TABLE_ROW_HTML);
+      const items =
+        kind === 'ongoing' ? await palCrawl.get() : await palCrawl.getDone();
+      expect(items).toEqual(palCrawl.parseTable(TABLE_ROW_HTML));
+      expect(mockGet).toHaveBeenCalledTimes(1);
+      expect(mockGet.mock.calls[0][0].pathname).toBe(path);
     });
 
-    test('get: returns items (up to 10 per page)', async () => {
-      const result = await palCrawl.get();
-      expect(result.length).toBeGreaterThan(0);
-      expect(result.length).toBeLessThanOrEqual(10);
-    });
+    test.each([
+      ['ongoing', Config.CONTENT_URL],
+      ['done', Config.DONE_CONTENT_URL],
+    ])(
+      'requests and parses %s notice details with both identifier keys',
+      async (kind, path) => {
+        mockGet.mockResolvedValue(CONTENT_HTML);
+        const detail =
+          kind === 'ongoing'
+            ? await palCrawl.getContent(' PRC_TEST000 ')
+            : await palCrawl.getDoneContent(' PRC_TEST000 ');
+        expect(detail.proposalReason).toBe('첫 번째 문장\n두 번째 문장');
+        const [url] = mockGet.mock.calls[0];
+        expect(url.pathname).toBe(path);
+        expect(url.searchParams.get('lgsltPaid')).toBe('PRC_TEST000');
+        expect(url.searchParams.get('lgsltPaId')).toBe('PRC_TEST000');
+      },
+    );
 
-    test('get: each item has valid structure and no garbled text', () => {
-      ongoingTable.forEach((e) => {
-        expect(e.subject).not.toContain('�');
-        expect(e.proposerCategory).not.toContain('�');
-        expect(e.committee).not.toContain('�');
-        expect(e.attachments.pdfFile).not.toBe('');
-        expect(e.attachments.hwpFile).not.toBe('');
-        expect(e.contentId).not.toBeNull();
-        expect(e.contentId?.startsWith('PRC_')).toBe(true);
-      });
-    });
+    test.each(['', '   '])(
+      'rejects blank detail identifiers before transport (%j)',
+      async (id) => {
+        await expect(palCrawl.getContentHTML(id)).rejects.toThrow(
+          'id is required',
+        );
+        await expect(palCrawl.getDoneContentHTML(id)).rejects.toThrow(
+          'id is required',
+        );
+        expect(mockGet).not.toHaveBeenCalled();
+      },
+    );
 
-    test('getContentHTML: returns non-empty html for known id', () => {
-      expect(typeof contentHtml).toBe('string');
-      expect(contentHtml.length).toBeGreaterThan(0);
-      expect(contentHtml).not.toContain('�');
-    });
-
-    test('getContent: parses all fields from known id without garbled text', () => {
-      expect(fixedContent.title.length).toBeGreaterThan(0);
-      expect(fixedContent.title).not.toContain('�');
-      expect(fixedContent.proposalReason).not.toBeNull();
-      expect(fixedContent.proposalReason?.length ?? 0).toBeGreaterThan(0);
-      expect(fixedContent.proposalReason ?? '').not.toContain('�');
-      expect(fixedContent.billNumber).not.toBeNull();
-      expect(fixedContent.proposer).not.toBeNull();
-      expect(fixedContent.proposalDate).not.toBeNull();
-      expect(fixedContent.committee).not.toBeNull();
-      expect(fixedContent.referralDate).not.toBeNull();
-      expect(fixedContent.noticePeriod).not.toBeNull();
-      expect(fixedContent.proposalSession).not.toBeNull();
-    });
-
-    test('getContentHTML: throws when id is an empty string', async () => {
-      await expect(palCrawl.getContentHTML('')).rejects.toThrow(
-        'id is required',
-      );
-    });
-
-    test('getContentHTML: throws when id is whitespace only', async () => {
-      await expect(palCrawl.getContentHTML('   ')).rejects.toThrow(
-        'id is required',
-      );
-    });
-  });
-
-  // ── done legislative notices (integration) ───────────────────────────────────
-
-  describe('done legislative notices', () => {
-    let doneHtml = '';
-    let doneTable: ITableData[] = [];
-    let doneContentHtml = '';
-    let doneContent: Awaited<ReturnType<PalCrawl['getDoneContent']>>;
-
-    beforeAll(async () => {
-      [doneHtml, doneContentHtml] = await Promise.all([
-        palCrawl.getDoneHTML(),
-        palCrawl.getDoneContentHTML(FIXED_DONE_CONTENT_ID),
-      ]);
-      doneTable = palCrawl.parseTable(doneHtml);
-      doneContent = palCrawl.parseContent(doneContentHtml);
-      debugLog('doneTable', doneTable);
-      debugLog('doneContent', doneContent);
-    });
-
-    test('getDoneHTML: returns a non-garbled html string', () => {
-      expect(typeof doneHtml).toBe('string');
-      expect(doneHtml.length).toBeGreaterThan(0);
-      expect(doneHtml).not.toContain('�');
-    });
-
-    test('getDone: returns 10 items per page', async () => {
-      const result = await palCrawl.getDone();
-      expect(result).toHaveLength(10);
-    });
-
-    test('getDone: each item has valid structure and no garbled text', () => {
-      doneTable.forEach((e) => {
-        expect(e.subject).not.toContain('�');
-        expect(e.proposerCategory).not.toContain('�');
-        expect(e.committee).not.toContain('�');
-        expect(e.contentId).not.toBeNull();
-        expect(e.contentId?.startsWith('PRC_')).toBe(true);
-      });
-    });
-
-    test('getDoneContentHTML: returns non-empty html for known id', () => {
-      expect(typeof doneContentHtml).toBe('string');
-      expect(doneContentHtml.length).toBeGreaterThan(0);
-      expect(doneContentHtml).not.toContain('�');
-    });
-
-    test('getDoneContent: parses title and bill info from known id', () => {
-      expect(doneContent.title.length).toBeGreaterThan(0);
-      expect(doneContent.title).not.toContain('�');
-      expect(doneContent.billNumber).not.toBeNull();
-      expect(doneContent.proposer).not.toBeNull();
-      expect(doneContent.proposalDate).not.toBeNull();
-      expect(doneContent.committee).not.toBeNull();
-    });
-
-    test('getDoneContentHTML: throws when id is an empty string', async () => {
-      await expect(palCrawl.getDoneContentHTML('')).rejects.toThrow(
-        'id is required',
-      );
-    });
-
-    test('getDoneContentHTML: throws when id is whitespace only', async () => {
-      await expect(palCrawl.getDoneContentHTML('   ')).rejects.toThrow(
-        'id is required',
-      );
-    });
-  });
-
-  // ── search / searchDone (integration) ─────────────────────────────────────────
-
-  describe('search / searchDone', () => {
-    test('search: returns ISearchResult with total, totalPages, currentPage', async () => {
-      const result = await palCrawl.search();
-      expect(result.total).toBeGreaterThan(0);
-      expect(result.totalPages).toBeGreaterThan(0);
-      expect(result.currentPage).toBe(1);
-      expect(result.items.length).toBeGreaterThan(0);
-    });
-
-    test('search: billName filter returns matching items', async () => {
-      const result = await palCrawl.search({ billName: '개정법률' });
-      expect(result.items.length).toBeGreaterThan(0);
-      result.items.forEach((item) => {
-        expect(item.subject).toMatch(/개정법률/);
-      });
-    });
-
-    test('search: sortCol=BILL_NAME sortGbn=ASC returns alphabetically sorted items', async () => {
-      const result = await palCrawl.search({
-        sortCol: 'BILL_NAME',
-        sortGbn: 'ASC',
-        pageUnit: 5,
-      });
-      expect(result.items.length).toBeGreaterThan(0);
-      // First subject should start alphabetically early (가ㅠ)
-      expect(result.items[0].subject).not.toContain('오류');
-    });
-
-    test('searchDone: returns ISearchResult with large total', async () => {
-      const result = await palCrawl.searchDone();
-      expect(result.total).toBeGreaterThan(1000);
-      expect(result.totalPages).toBeGreaterThan(100);
-      expect(result.currentPage).toBe(1);
-    });
-
-    test('searchDone: fromAge/toAge filter narrows results', async () => {
-      const result = await palCrawl.searchDone({
+    test('passes notice search filters without altering their values', async () => {
+      mockGet.mockResolvedValue(SEARCH_RESULT_HTML);
+      const query = {
+        billName: '개정법률',
         fromAge: 22,
         toAge: 22,
         pageUnit: 5,
+        pageIndex: 2,
+        sortCol: 'BILL_NAME',
+        sortGbn: 'ASC',
+      } satisfies Parameters<PalCrawl['search']>[0];
+      const result = await palCrawl.search(query);
+      expect(result).toMatchObject({
+        total: 143,
+        totalPages: 15,
+        currentPage: 2,
       });
-      // The site always reports the global total in the count area,
-      // but the returned items are filtered to the specified session range.
-      expect(result.items.length).toBeGreaterThan(0);
-      expect(result.items.length).toBeLessThanOrEqual(5);
-    });
-  });
-
-  // ── getPage / getDonePage (integration) ─────────────────────────────────────
-
-  describe('getPage / getDonePage', () => {
-    test('getPage(1): returns same items as get()', async () => {
-      const [page1, legacy] = await Promise.all([
-        palCrawl.getPage(1),
-        palCrawl.get(),
-      ]);
-      expect(page1).toHaveLength(legacy.length);
-      expect(page1[0].subject).toBe(legacy[0].subject);
-    });
-
-    test('getDonePage(2): returns different items from page 1', async () => {
-      const [page1, page2] = await Promise.all([
-        palCrawl.getDonePage(1),
-        palCrawl.getDonePage(2),
-      ]);
-      expect(page1.length).toBeGreaterThan(0);
-      expect(page2.length).toBeGreaterThan(0);
-      expect(page1[0].subject).not.toBe(page2[0].subject);
-    });
-
-    test('getDonePage: pageUnit=20 returns up to 20 items', async () => {
-      const items = await palCrawl.getDonePage(1, 20);
-      expect(items.length).toBeLessThanOrEqual(20);
-      expect(items.length).toBeGreaterThan(10);
-    });
-
-    test('getDonePage(2): returns items different from page 1', async () => {
-      const [page1, page2] = await Promise.all([
-        palCrawl.getDonePage(1),
-        palCrawl.getDonePage(2),
-      ]);
-      expect(page1[0].subject).not.toBe(page2[0].subject);
-    });
-  });
-
-  // ── getAllPages / getAllDonePages (integration) ──────────────────────────────
-
-  describe('getAllPages / getAllDonePages', () => {
-    test('getAllPages: yields exactly maxPages results', async () => {
-      const pages: ISearchResult[] = [];
-      for await (const page of palCrawl.getAllPages(
-        { pageUnit: 5 },
-        { maxPages: 2, delayMs: 0 },
-      )) {
-        pages.push(page);
+      expect(result.items).toEqual(palCrawl.parseTable(SEARCH_RESULT_HTML));
+      const [url] = mockGet.mock.calls[0];
+      for (const [name, value] of Object.entries(query)) {
+        expect(url.searchParams.get(name)).toBe(String(value));
       }
+    });
+
+    test('passes explicit completed-page pagination to the site', async () => {
+      mockGet.mockResolvedValue(SEARCH_RESULT_HTML);
+      const items = await palCrawl.getDonePage(2, 20);
+      expect(items).toHaveLength(1);
+      const [url] = mockGet.mock.calls[0];
+      expect(url.pathname).toBe(Config.DONE_LIST_URL);
+      expect(url.searchParams.get('pageIndex')).toBe('2');
+      expect(url.searchParams.get('pageUnit')).toBe('20');
+    });
+
+    test('preserves request failures instead of returning an empty list', async () => {
+      mockGet.mockRejectedValue(new Error('transport unavailable'));
+      await expect(palCrawl.search()).rejects.toThrow('transport unavailable');
+      await expect(palCrawl.getDoneContent('PRC_TEST000')).rejects.toThrow(
+        'transport unavailable',
+      );
+    });
+
+    test.each(['ongoing', 'done'])(
+      'yields %s pages in order and respects the explicit page limit',
+      async (kind) => {
+        mockGet.mockImplementation(async (url) =>
+          SEARCH_RESULT_HTML.replace(
+            '(2/15',
+            `(${url.searchParams.get('pageIndex')}/15`,
+          ),
+        );
+        const pages: ISearchResult[] = [];
+        const iterator =
+          kind === 'ongoing'
+            ? palCrawl.getAllPages(
+                {},
+                { maxPages: 3, delayMs: 0, concurrency: 2 },
+              )
+            : palCrawl.getAllDonePages(
+                {},
+                { maxPages: 3, delayMs: 0, concurrency: 2 },
+              );
+        for await (const page of iterator) pages.push(page);
+        expect(pages.map((page) => page.currentPage)).toEqual([1, 2, 3]);
+        expect(mockGet).toHaveBeenCalledTimes(3);
+      },
+    );
+
+    test('stops pagination at an empty page', async () => {
+      mockGet.mockResolvedValueOnce(SEARCH_RESULT_HTML).mockResolvedValue('');
+      const pages: ISearchResult[] = [];
+      for await (const page of palCrawl.getAllPages({}, { delayMs: 0 }))
+        pages.push(page);
       expect(pages).toHaveLength(2);
-      expect(pages[0].items.length).toBeGreaterThan(0);
-      expect(pages[1].items.length).toBeGreaterThan(0);
-    });
-
-    test('getAllDonePages: currentPage increments correctly', async () => {
-      const pages: ISearchResult[] = [];
-      for await (const page of palCrawl.getAllDonePages(
-        { pageUnit: 5 },
-        { maxPages: 3, delayMs: 0 },
-      )) {
-        pages.push(page);
-      }
-      expect(pages[0].currentPage).toBe(1);
-      expect(pages[1].currentPage).toBe(2);
-      expect(pages[2].currentPage).toBe(3);
-    });
-
-    test('getAllDonePages: total and totalPages are consistent across pages', async () => {
-      const pages: ISearchResult[] = [];
-      for await (const page of palCrawl.getAllDonePages(
-        {},
-        { maxPages: 2, delayMs: 0 },
-      )) {
-        pages.push(page);
-      }
-      expect(pages[0].total).toBe(pages[1].total);
-      expect(pages[0].totalPages).toBe(pages[1].totalPages);
-    });
-
-    test('getAllPages: page 2 items differ from page 1', async () => {
-      const pages: ISearchResult[] = [];
-      for await (const page of palCrawl.getAllPages(
-        { pageUnit: 5 },
-        { maxPages: 2, delayMs: 0 },
-      )) {
-        pages.push(page);
-      }
-      expect(pages[0].items[0].subject).not.toBe(pages[1].items[0].subject);
-    });
-
-    test('getAllDonePages: concurrency > 1 yields pages in order', async () => {
-      const pages: ISearchResult[] = [];
-      for await (const page of palCrawl.getAllDonePages(
-        { pageUnit: 5 },
-        { maxPages: 4, delayMs: 0, concurrency: 2 },
-      )) {
-        pages.push(page);
-      }
-      expect(pages).toHaveLength(4);
-      for (let i = 0; i < pages.length; i++) {
-        expect(pages[i].currentPage).toBe(i + 1);
-      }
-    });
-
-    test('getAllDonePages: yields 2 pages of done notices', async () => {
-      const pages: ISearchResult[] = [];
-      for await (const page of palCrawl.getAllDonePages(
-        { pageUnit: 5 },
-        { maxPages: 2, delayMs: 0 },
-      )) {
-        pages.push(page);
-      }
-      expect(pages).toHaveLength(2);
-      expect(pages[0].total).toBeGreaterThan(1000);
-      expect(pages[0].items[0].subject).not.toBe(pages[1].items[0].subject);
+      expect(pages[1].items).toEqual([]);
+      expect(mockGet).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -890,13 +732,10 @@ describe('PalCrawl', () => {
       expect(crawler).toBeInstanceOf(PalCrawl);
     });
 
-    test('initBrowser and closeBrowser can be called', async () => {
-      const crawler = new PalCrawl({
-        screenshot: { enabled: true },
-      });
-      // Note: These tests don't actually require a browser to pass.
-      // In a real scenario with HEADLESS_BROWSER env set, these would work.
-      expect(crawler).toBeInstanceOf(PalCrawl);
+    test('closes an unused crawler without starting a browser', async () => {
+      const crawler = new PalCrawl({ screenshot: { enabled: true } });
+      await crawler.closeBrowser();
+      expect(crawler.browser).toBeNull();
     });
   });
 });
@@ -974,7 +813,7 @@ describe('NsmLmStsParser', () => {
       expect(item.resolutionDate).toBe('');
     });
 
-    test('pending bill: progressStatus is "발의"', () => {
+    test('returns the introduced status for a pending bill', () => {
       const item = parser.parseList(NSM_LIST_HTML_PENDING).items[0];
       expect(item.progressStatus).toBe('발의');
     });
@@ -1121,6 +960,42 @@ describe('NsmLmSts', () => {
   const nsm = new NsmLmSts();
 
   describe('search title hydration', () => {
+    test('hydrates truncated titles sequentially by default', async () => {
+      const instance = new NsmLmSts({ hydrateTruncatedTitles: true });
+      const httpClient = (
+        instance as unknown as {
+          httpClient: { get: (url: URL) => Promise<string> };
+        }
+      ).httpClient;
+      let activeRequests = 0;
+      let maxActiveRequests = 0;
+      const mockGet = jest
+        .spyOn(httpClient, 'get')
+        .mockImplementation(async (url) => {
+          if (!url.pathname.endsWith('/detailRP')) {
+            return (
+              NSM_LIST_HTML_TRUNCATED_TITLE +
+              NSM_LIST_HTML_TRUNCATED_TITLE.replace(/2219088/g, '2219089')
+            );
+          }
+          activeRequests++;
+          maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+          await Promise.resolve();
+          activeRequests--;
+          return NSM_DETAIL_HTML;
+        });
+      try {
+        const result = await instance.search();
+        expect(result.items).toHaveLength(2);
+        expect(
+          result.items.every((item) => !item.billName.includes('...')),
+        ).toBe(true);
+        expect(maxActiveRequests).toBe(1);
+      } finally {
+        mockGet.mockRestore();
+      }
+    });
+
     test('skips detail requests when list title is not truncated', async () => {
       const instance = new NsmLmSts();
       const httpClient = (
@@ -1130,8 +1005,7 @@ describe('NsmLmSts', () => {
       ).httpClient;
       const mockGet = jest
         .spyOn(httpClient, 'get')
-        .mockImplementation(async (...args: unknown[]) => {
-          const url = args[0] as URL;
+        .mockImplementation(async (url) => {
           const urlString = url.toString();
           if (urlString.includes('/detailRP')) {
             throw new Error('detail should not be requested for full title');
@@ -1156,8 +1030,7 @@ describe('NsmLmSts', () => {
       ).httpClient;
       const mockGet = jest
         .spyOn(httpClient, 'get')
-        .mockImplementation(async (...args: unknown[]) => {
-          const url = args[0] as URL;
+        .mockImplementation(async (url) => {
           const urlString = url.toString();
           if (urlString.includes('/detailRP')) {
             return NSM_DETAIL_HTML;
@@ -1181,8 +1054,7 @@ describe('NsmLmSts', () => {
       ).httpClient;
       const mockGet = jest
         .spyOn(httpClient, 'get')
-        .mockImplementation(async (...args: unknown[]) => {
-          const url = args[0] as URL;
+        .mockImplementation(async (url) => {
           const urlString = url.toString();
           if (urlString.includes('/detailRP')) {
             throw new Error('detail fetch failed');
@@ -1206,8 +1078,7 @@ describe('NsmLmSts', () => {
       ).httpClient;
       const mockGet = jest
         .spyOn(httpClient, 'get')
-        .mockImplementation(async (...args: unknown[]) => {
-          const url = args[0] as URL;
+        .mockImplementation(async (url) => {
           expect(url.toString()).not.toContain('/detailRP');
           return NSM_LIST_HTML_TRUNCATED_TITLE;
         });
@@ -1289,217 +1160,105 @@ describe('NsmLmSts', () => {
     });
   });
 
-  // ── search integration ────────────────────────────────────────────────────
+  describe('fixture-backed requests', () => {
+    let mockGet: jest.SpyInstance<Promise<string>, [URL]>;
 
-  describe('search (integration)', () => {
-    let searchResult: INsmSearchResult;
-
-    beforeAll(async () => {
-      searchResult = await nsm.search({ pageSize: 5 });
-      debugLog('nsm.search', searchResult);
+    beforeEach(() => {
+      mockGet = jest.spyOn(getHttpClient(nsm), 'get');
     });
 
-    test('returns non-garbled html string (getListHTML)', async () => {
-      const html = await nsm.getListHTML({ pageSize: 5 });
-      expect(typeof html).toBe('string');
-      expect(html.length).toBeGreaterThan(0);
-      expect(html).not.toContain('\ufffd');
+    test('passes search filters and parses the returned page', async () => {
+      mockGet.mockResolvedValue(NSM_LIST_HTML);
+      const query = {
+        pageSize: 5,
+        pageIndex: 2,
+        scBlNmSct: '인공지능',
+        sortOrder: 'ASC',
+      } satisfies Parameters<NsmLmSts['search']>[0];
+      const result = await nsm.search(query);
+      expect(result).toEqual(nsm.parseList(NSM_LIST_HTML));
+      const [url] = mockGet.mock.calls[0];
+      expect(url.pathname).toBe(Config.NSM_LIST_URL);
+      expect(url.searchParams.get('scBlNm')).toBe('scBlNm_blNm');
+      for (const [name, value] of Object.entries(query))
+        expect(url.searchParams.get(name)).toBe(String(value));
     });
 
-    test('returns INsmSearchResult with total > 0', () => {
-      expect(searchResult.total).toBeGreaterThan(0);
-      expect(searchResult.totalPages).toBeGreaterThan(0);
-      expect(searchResult.currentPage).toBe(1);
+    test('applies the pending-status filter while retaining other filters', async () => {
+      mockGet.mockResolvedValue(NSM_LIST_HTML_PENDING);
+      const result = await nsm.searchPending({ pageSize: 5, sugCd: '22' });
+      expect(result.items[0].progressStatus).toBe('발의');
+      const [url] = mockGet.mock.calls[0];
+      expect(url.searchParams.get('rslRsltNmL')).toBe('900101');
+      expect(url.searchParams.get('sugCd')).toBe('22');
+      expect(url.searchParams.get('pageSize')).toBe('5');
     });
 
-    test('returns items with valid structure and no garbled text', () => {
-      expect(searchResult.items.length).toBeGreaterThan(0);
-      for (const item of searchResult.items) {
-        expect(item.billName).not.toContain('\ufffd');
-        expect(item.billNo).toMatch(/^\d+$/);
-        expect(item.link).toContain('/gcom/nsmLmSts/out/');
-        expect(item.proposer).not.toContain('\ufffd');
-        expect(item.proposer.length).toBeGreaterThan(0);
-        expect(item.proposalDate.length).toBeGreaterThan(0);
-        expect(item.progressStatus.length).toBeGreaterThan(0);
-      }
+    test('parses a requested detail page without a second list request', async () => {
+      mockGet.mockResolvedValue(NSM_DETAIL_HTML);
+      const detail = await nsm.getDetail(' 2219088 ');
+      expect(detail.billNo).toBe('2219088');
+      expect(detail.title).toBe('인공지능 기본법 일부개정법률안');
+      expect(detail.attachments).toHaveLength(2);
+      expect(mockGet).toHaveBeenCalledTimes(1);
+      expect(mockGet.mock.calls[0][0].pathname).toBe(
+        '/gcom/nsmLmSts/out/2219088/detailRP',
+      );
     });
 
-    test('pageSize filter limits returned items', async () => {
-      const r5 = await nsm.search({ pageSize: 5 });
-      const r10 = await nsm.search({ pageSize: 10 });
-      expect(r5.items.length).toBeLessThanOrEqual(5);
-      expect(r10.items.length).toBeLessThanOrEqual(10);
+    test('requests explicit page numbers and returns their parsed items', async () => {
+      mockGet.mockResolvedValue(NSM_LIST_HTML);
+      const result = await nsm.getPage(2, { pageSize: 5 });
+      expect(result).toEqual(nsm.parseList(NSM_LIST_HTML).items);
+      const [url] = mockGet.mock.calls[0];
+      expect(url.searchParams.get('pageIndex')).toBe('2');
+      expect(url.searchParams.get('pageSize')).toBe('5');
     });
 
-    test('pageIndex=2 returns different items from page 1', async () => {
-      const page1 = await nsm.search({ pageSize: 5, pageIndex: 1 });
-      const page2 = await nsm.search({ pageSize: 5, pageIndex: 2 });
-      expect(page1.items.length).toBeGreaterThan(0);
-      expect(page2.items.length).toBeGreaterThan(0);
-      expect(page1.items[0].billNo).not.toBe(page2.items[0].billNo);
-    });
-  });
-
-  // ── searchPending integration ─────────────────────────────────────────────
-
-  describe('searchPending (integration)', () => {
-    let pendingResult: INsmSearchResult;
-
-    beforeAll(async () => {
-      pendingResult = await nsm.searchPending({ pageSize: 5 });
-      debugLog('nsm.searchPending', pendingResult);
+    test('propagates required list and detail request errors', async () => {
+      mockGet.mockRejectedValue(new Error('transport unavailable'));
+      await expect(nsm.search()).rejects.toThrow('transport unavailable');
+      await expect(nsm.getDetail('2219088')).rejects.toThrow(
+        'transport unavailable',
+      );
     });
 
-    test('returns INsmSearchResult with valid structure', () => {
-      expect(typeof pendingResult.total).toBe('number');
-      expect(typeof pendingResult.totalPages).toBe('number');
-      expect(pendingResult.currentPage).toBe(1);
-    });
-
-    test('all returned bills have progressStatus "발의"', () => {
-      for (const item of pendingResult.items) {
-        expect(item.progressStatus).toBe('발의');
-      }
-    });
-
-    test('all pending bills have no resolutionStatus', () => {
-      for (const item of pendingResult.items) {
-        expect(item.resolutionStatus).toBe('');
-      }
-    });
-
-    test('no garbled text in pending bill names', () => {
-      for (const item of pendingResult.items) {
-        expect(item.billName).not.toContain('\ufffd');
-      }
-    });
-  });
-
-  // ── getPage / getDetail integration ───────────────────────────────────────
-
-  describe('getPage / getDetail (integration)', () => {
-    let firstBillNo: string;
-    let pageItems: INsmBillItem[];
-
-    beforeAll(async () => {
-      pageItems = await nsm.getPage(1, { pageSize: 5 });
-      firstBillNo = pageItems[0]?.billNo ?? '';
-      debugLog('nsm.getPage(1)', pageItems);
-    });
-
-    test('getPage(1): returns INsmBillItem array', () => {
-      expect(Array.isArray(pageItems)).toBe(true);
-      expect(pageItems.length).toBeGreaterThan(0);
-    });
-
-    test('getPage(2): returns different items from page 1', async () => {
-      const page2 = await nsm.getPage(2, { pageSize: 5 });
-      expect(page2.length).toBeGreaterThan(0);
-      expect(page2[0].billNo).not.toBe(pageItems[0].billNo);
-    });
-
-    test('getDetailHTML: returns non-empty, non-garbled html', async () => {
-      if (!firstBillNo) return;
-      const html = await nsm.getDetailHTML(firstBillNo);
-      expect(typeof html).toBe('string');
-      expect(html.length).toBeGreaterThan(0);
-      expect(html).not.toContain('\ufffd');
-    });
-
-    test('getDetail: returns INsmBillDetail with valid fields', async () => {
-      if (!firstBillNo) return;
-      const detail = await nsm.getDetail(firstBillNo);
-      debugLog('nsm.getDetail', detail);
-      expect(detail.title.length).toBeGreaterThan(0);
-      expect(detail.title).not.toContain('\ufffd');
-      expect(detail.billNo).toMatch(/^\d+$/);
-      expect(detail.proposer.length).toBeGreaterThan(0);
-      expect(detail.proposalDate.length).toBeGreaterThan(0);
-    });
-  });
-
-  // ── getAllPages / getAllPendingPages integration ───────────────────────────
-
-  describe('getAllPages / getAllPendingPages (integration)', () => {
-    test('getAllPages: yields exactly maxPages results', async () => {
-      const pages: INsmSearchResult[] = [];
-      for await (const page of nsm.getAllPages(
-        { pageSize: 5 },
-        { maxPages: 2, delayMs: 0 },
-      )) {
-        pages.push(page);
-      }
-      expect(pages).toHaveLength(2);
-      expect(pages[0].items.length).toBeGreaterThan(0);
-      expect(pages[1].items.length).toBeGreaterThan(0);
-    });
-
-    test('getAllPages: currentPage increments correctly', async () => {
-      const pages: INsmSearchResult[] = [];
-      for await (const page of nsm.getAllPages(
-        { pageSize: 5 },
-        { maxPages: 3, delayMs: 0 },
-      )) {
-        pages.push(page);
-      }
-      expect(pages[0].currentPage).toBe(1);
-      expect(pages[1].currentPage).toBe(2);
-      expect(pages[2].currentPage).toBe(3);
-    });
-
-    test('getAllPages: total is consistent across pages', async () => {
-      const pages: INsmSearchResult[] = [];
-      for await (const page of nsm.getAllPages(
-        { pageSize: 5 },
-        { maxPages: 2, delayMs: 0 },
-      )) {
-        pages.push(page);
-      }
-      expect(pages[0].total).toBe(pages[1].total);
-      expect(pages[0].totalPages).toBe(pages[1].totalPages);
-    });
-
-    test('getAllPages: page 2 items differ from page 1', async () => {
-      const pages: INsmSearchResult[] = [];
-      for await (const page of nsm.getAllPages(
-        { pageSize: 5 },
-        { maxPages: 2, delayMs: 0 },
-      )) {
-        pages.push(page);
-      }
-      expect(pages[0].items[0].billNo).not.toBe(pages[1].items[0].billNo);
-    });
-
-    test('getAllPages: concurrency > 1 yields pages in order', async () => {
-      const pages: INsmSearchResult[] = [];
-      for await (const page of nsm.getAllPages(
-        { pageSize: 5 },
-        { maxPages: 4, delayMs: 0, concurrency: 2 },
-      )) {
-        pages.push(page);
-      }
-      expect(pages).toHaveLength(4);
-      for (let i = 0; i < pages.length; i++) {
-        expect(pages[i].currentPage).toBe(i + 1);
-      }
-    });
-
-    test('getAllPendingPages: yields at least 1 page of pending bills', async () => {
-      const pages: INsmSearchResult[] = [];
-      for await (const page of nsm.getAllPendingPages(
-        { pageSize: 5 },
-        { maxPages: 1, delayMs: 0 },
-      )) {
-        pages.push(page);
-      }
-      expect(pages.length).toBeGreaterThanOrEqual(1);
-      // Every item must be in 발의 상태
-      for (const page of pages) {
-        for (const item of page.items) {
-          expect(item.progressStatus).toBe('발의');
+    test.each(['all', 'pending'])(
+      'yields %s pages in order with the requested filters',
+      async (kind) => {
+        mockGet.mockImplementation(async (url) => {
+          const page = url.searchParams.get('pageIndex');
+          return NSM_LIST_HTML_PENDING.replace(
+            '<em>1</em>',
+            `<em>${page}</em>`,
+          );
+        });
+        const pages: INsmSearchResult[] = [];
+        const iterator =
+          kind === 'all'
+            ? nsm.getAllPages({}, { maxPages: 3, delayMs: 0, concurrency: 2 })
+            : nsm.getAllPendingPages(
+                {},
+                { maxPages: 3, delayMs: 0, concurrency: 2 },
+              );
+        for await (const page of iterator) pages.push(page);
+        expect(pages.map((page) => page.currentPage)).toEqual([1, 2, 3]);
+        expect(mockGet).toHaveBeenCalledTimes(3);
+        if (kind === 'pending') {
+          for (const [url] of mockGet.mock.calls)
+            expect(url.searchParams.get('rslRsltNmL')).toBe('900101');
         }
-      }
+      },
+    );
+
+    test('stops pagination when the next page is empty', async () => {
+      mockGet.mockResolvedValueOnce(NSM_LIST_HTML).mockResolvedValue('');
+      const pages: INsmSearchResult[] = [];
+      for await (const page of nsm.getAllPages({}, { delayMs: 0 }))
+        pages.push(page);
+      expect(pages).toHaveLength(2);
+      expect(pages[1].items).toEqual([]);
+      expect(mockGet).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -1541,9 +1300,10 @@ describe('NsmLmSts', () => {
       expect(instance).toBeInstanceOf(NsmLmSts);
     });
 
-    test('initBrowser and closeBrowser can be called', async () => {
+    test('closes an unused crawler without starting a browser', async () => {
       const instance = new NsmLmSts({ screenshot: { enabled: true } });
-      expect(instance).toBeInstanceOf(NsmLmSts);
+      await instance.closeBrowser();
+      expect(instance.browser).toBeNull();
     });
   });
 });

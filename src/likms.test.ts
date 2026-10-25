@@ -345,6 +345,13 @@ describe('LikmsCrawler', () => {
   });
 
   describe('resolveBillId', () => {
+    test('propagates transport SyntaxErrors instead of treating them as malformed JSON', async () => {
+      const crawler = new LikmsCrawler();
+      const error = new SyntaxError('transport response failed');
+      jest.spyOn(getLikmsHttpClient(crawler), 'get').mockRejectedValue(error);
+      await expect(crawler.resolveBillId('2221883')).rejects.toBe(error);
+    });
+
     test('returns the billId from the JSON payload', async () => {
       const crawler = new LikmsCrawler();
       const getSpy = jest
@@ -433,7 +440,7 @@ describe('LikmsDetailParser', () => {
       expect(detail.attachments).toHaveLength(0);
     });
 
-    test('parses 접수정보 and the proposal reason from the billInfo fragment', () => {
+    test('parses receipt information and proposal reason from the billInfo fragment', () => {
       const detail = parser.parseDetail(LIKMS_BILL_INFO_FRAGMENT_HTML);
 
       expect(detail.title).toBe('');
@@ -868,6 +875,22 @@ describe('LikmsStateParser', () => {
   const parser = new LikmsStateParser();
 
   describe('parseCommittees', () => {
+    test('normalizes non-finite committee ordering to null', () => {
+      expect(
+        parser.parseCommittees(
+          '{"ageCmtList":[{"comCd":"code","comCdName":"Committee","cdOrd":1e400}]}',
+        ),
+      ).toEqual([{ comCd: 'code', comCdName: 'Committee', cdOrd: null }]);
+    });
+
+    test.each([
+      'null',
+      '[]',
+      '{"ageCmtList":[null,[],1,{"comCd":1,"comCdName":true}]}',
+    ])('returns an empty list for malformed committee shapes (%s)', (payload) =>
+      expect(parser.parseCommittees(payload)).toEqual([]),
+    );
+
     test('parses the committee json payload', () => {
       const committees = parser.parseCommittees(LIKMS_COMMITTEE_JSON);
 
@@ -904,6 +927,14 @@ describe('LikmsStateParser', () => {
   });
 
   describe('parseList', () => {
+    test('returns numeric defaults for malformed pagination counters', () => {
+      const result = parser.parseList(
+        '<input id="pager_pages_text" value="(,/,, 페이지)">',
+      );
+      expect(result.currentPage).toBe(1);
+      expect(result.totalPages).toBe(0);
+    });
+
     test('returns an empty result for invalid html', () => {
       const result = parser.parseList('asdf');
       expect(result.items).toHaveLength(0);
@@ -970,7 +1001,7 @@ describe('LikmsStateParser', () => {
       expect(parser.parseSameNameCandidates('asdf')).toHaveLength(0);
     });
 
-    test('parses one candidate per row with 대수, 한자명 and 정당명', () => {
+    test('parses one candidate per row with assembly term, Hanja name, and party', () => {
       const candidates = parser.parseSameNameCandidates(
         LIKMS_SAME_NM_POPUP_HTML,
       );
@@ -993,7 +1024,7 @@ describe('LikmsStateParser', () => {
       ]);
     });
 
-    test('keeps same-대수 candidates distinct by 정당 and 한자명', () => {
+    test('distinguishes candidates in the same assembly term by party and Hanja name', () => {
       const candidates = parser.parseSameNameCandidates(
         LIKMS_SAME_NM_SAME_AGE_POPUP_HTML,
       );
@@ -1183,7 +1214,7 @@ describe('LikmsStateCrawler', () => {
       postSpy.mockRestore();
     });
 
-    test('includes the 소관위 처리결과와 공동발의 filters in the posted body', async () => {
+    test('includes committee result and joint proposal filters in the posted body', async () => {
       const crawler = new LikmsStateCrawler();
       const httpClient = getLikmsStateHttpClient(crawler);
       const getSpy = jest
@@ -1258,7 +1289,7 @@ describe('LikmsStateCrawler', () => {
       postSpy.mockRestore();
     });
 
-    test('defaults representKindCd to 전체 when only representId is given', async () => {
+    test('defaults to all representation kinds when only representId is given', async () => {
       const crawler = new LikmsStateCrawler();
       const httpClient = getLikmsStateHttpClient(crawler);
       jest.spyOn(httpClient, 'get').mockResolvedValue(LIKMS_STATE_PAGE_HTML);
@@ -1504,7 +1535,7 @@ describe('LikmsStateCrawler', () => {
   });
 
   describe('filterPending', () => {
-    test('keeps only items whose progressStatus is 접수', () => {
+    test('keeps only items at the receipt stage', () => {
       const crawler = new LikmsStateCrawler();
       const items = new LikmsStateParser().parseList(
         LIKMS_STATE_FRAGMENT_HTML,

@@ -9,3 +9,9 @@ coverage/
 agent_memories/
 # 에이전트 상태 파일
 .freebuff/
+# Repository-only agent guidance and development configuration
+AGENTS.md
+.prettierrc
+eslint.config.mjs
+renovate.json
+tsconfig.json
