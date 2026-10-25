@@ -833,7 +833,7 @@ function checkLive() {
 
 // ─── 실행 ────────────────────────────────────────────────────────────────────
 
-(async () => {
+async function main() {
   console.log(`pal-crawl dist 런타임 검증${LIVE ? ' (--live)' : ''}`);
   console.log(`  entry: ${DIST_ENTRY}`);
 
@@ -850,4 +850,9 @@ function checkLive() {
   const passed = results.length - failed;
   console.log(`\n${passed}/${results.length} checks passed`);
   process.exit(failed > 0 ? 1 : 0);
-})();
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

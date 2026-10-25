@@ -63,24 +63,23 @@ export class LikmsCrawler {
     const url = new URL(Config.LIKMS_FIND_BILL_URL, Config.LIKMS_DOMAIN);
     url.searchParams.set('billNo', normalized);
 
+    const raw = await this.httpClient.get(url);
     let parsed: unknown;
     try {
-      parsed = JSON.parse(await this.httpClient.get(url));
-    } catch (error) {
-      if (error instanceof SyntaxError) {
-        return null;
-      }
-      throw error;
+      parsed = JSON.parse(raw);
+    } catch {
+      // Malformed payloads are missing data; required transport failures propagate.
+      return null;
     }
 
-    if (typeof parsed !== 'object' || parsed === null) {
+    if (typeof parsed !== 'object' || parsed === null || !('data' in parsed)) {
       return null;
     }
-    const data = (parsed as Record<string, unknown>).data;
-    if (typeof data !== 'object' || data === null) {
+    const data = parsed.data;
+    if (typeof data !== 'object' || data === null || !('billId' in data)) {
       return null;
     }
-    const billId = (data as Record<string, unknown>).billId;
+    const billId = data.billId;
     return typeof billId === 'string' && billId.trim() ? billId.trim() : null;
   }
 

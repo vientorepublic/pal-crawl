@@ -1,7 +1,10 @@
 # agent_memories INDEX
 
-에이전트 메모리 진입점. **작업 시작 시 이 파일을 먼저 읽고**, 레코드를 추가/갱신한 뒤에는
-이 표를 함께 갱신한다. 형식 규칙은 [README.md](./README.md)가 단일 진실원이다.
+> Historical index (through 2026-10-14). Start new work at [README.md](README.md).
+> Existing rows and activity entries are preserved as historical evidence; add new topics to the current index.
+
+이전 에이전트 메모리 진입점. 아래 목록은 과거 기록이며,
+이 표를 함께 갱신한다는 이전 규칙은 보관용이다. 당시 형식은 [LEGACY-FORMAT.md](./LEGACY-FORMAT.md)를 참고한다.
 
 ## 전체 레코드
 

@@ -81,7 +81,7 @@ build_issue_body() {
         "24시간 주기 점검이 PAL·NSM·LIKMS의 DOM·AJAX 계약을 실사이트와 대조한 결과입니다.",
         "",
         "- 점검 시각: `\(.checkedAtKst // .checkedAt)`",
-        "- pal-crawl 버전: `\(.libraryVersion)`",
+        "- 패키지 버전: `\(.libraryVersion)`",
         "- 점검 결과: 점검 \(.summary.checks)건 · 계약 유지 \(.summary.ok) · 계약 위반 \(.summary.drift) · 확인 불가 \(.summary.inconclusive) · 건너뜀 \(.summary.skipped)",
         (if $retried > 0
            then "- 재점검: 확인 불가 항목을 지연 \(.retry.delayMs)ms 두고 \(.retry.attempts)회 다시 점검 — 판정 변경 \(.retry.recovered | length)건"
@@ -124,9 +124,9 @@ build_webhook_text() {
   jq -r --arg mode "${MODE}" '
     ($mode) as $m
     | [
-        (if $m == "drift" then "❌ pal-crawl 크롤러 계약 위반 감지"
-         elif $m == "inconclusive" then "⚠️ pal-crawl 계약 확인 불가(접속 실패)"
-         else "✅ pal-crawl 크롤러 계약 복구"
+        (if $m == "drift" then "❌ 크롤러 계약 위반 감지"
+         elif $m == "inconclusive" then "⚠️ 계약 확인 불가(접속 실패)"
+         else "✅ 크롤러 계약 검증 성공"
          end),
         "계약 위반 \(.summary.drift)건 · 확인 불가 \(.summary.inconclusive)건 (점검 \(.summary.checks)건, \(.checkedAtKst))",
         (if (.retry.attempts // 0) > 0

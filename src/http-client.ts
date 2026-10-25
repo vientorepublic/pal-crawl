@@ -18,6 +18,9 @@ export class HttpClient {
   private readonly cookies: Map<string, string> = new Map();
 
   constructor(config: HttpClientConfig) {
+    if (!Number.isInteger(config.retryCount) || config.retryCount < 0) {
+      throw new Error('retryCount must be a non-negative integer');
+    }
     this.userAgent = config.userAgent;
     this.timeout = config.timeout;
     this.retryCount = config.retryCount;
@@ -161,7 +164,11 @@ export class HttpClient {
       };
 
       const req = https.request(url, options, (res) => {
+        res.on('error', reject);
+        res.on('aborted', () => reject(new Error('Response aborted')));
         if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+          // Drain rejected responses so the connection can be released.
+          res.resume();
           reject(
             new Error(
               `Invalid response: ${res.statusCode} ${res.statusMessage}`,
@@ -225,21 +232,18 @@ export class HttpClient {
     body?: string,
     headers?: Record<string, string>,
   ): Promise<string> {
-    let lastError: Error;
-
-    for (let attempt = 1; attempt <= this.retryCount; attempt++) {
+    // Keep positive retryCount values compatible with the existing attempt limit.
+    const maxAttempts = Math.max(1, this.retryCount);
+    for (let attempt = 1; ; attempt++) {
       try {
         return await this.makeRequest(url, method, body, headers);
       } catch (error) {
-        lastError = error as Error;
-
-        if (attempt < this.retryCount) {
-          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-          await new Promise((resolve) => setTimeout(resolve, delay));
+        if (attempt >= maxAttempts) {
+          throw error instanceof Error ? error : new Error(String(error));
         }
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
       }
     }
-
-    throw lastError!;
   }
 }

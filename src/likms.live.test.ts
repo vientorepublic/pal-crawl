@@ -181,7 +181,7 @@ describeLive('LikmsStateCrawler (live)', () => {
     expect(filtered.items.map((item) => item.billNo)).toContain(sample.billNo);
   });
 
-  test('findCommittees returns the 소관위 list and narrows by code', async () => {
+  test('returns the committee list and narrows by code', async () => {
     const committees = await crawler.findCommittees(22, 22);
     expect(committees.length).toBeGreaterThan(10);
     // 고정 코드를 박지 않고 목록에서 실존하는 항목을 골라 쓴다.
@@ -226,7 +226,7 @@ describeLive('LikmsStateCrawler (live)', () => {
     expect(joint.total + single.total).toBe(all.total);
   });
 
-  test('resolves a 상임위 name onto the likms code (adapter)', async () => {
+  test('resolves a committee name to the LIKMS code through the adapter', async () => {
     const adapter = new LikmsNsmAdapter();
     const committees = await adapter.likms.findCommittees(22, 22);
     const target = committees.find(
@@ -254,7 +254,7 @@ describeLive('LikmsStateCrawler (live)', () => {
     ).rejects.toThrow(/unknown committee/);
   });
 
-  test('lists 발의자 후보 with 대수·정당 and filters by the picked membId', async () => {
+  test('lists member candidates with assembly terms and parties and filters by the selected ID', async () => {
     const first = await crawler.search();
     const names = extractProposerNames(first.items);
     expect(names.length).toBeGreaterThan(0);
