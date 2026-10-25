@@ -1618,7 +1618,7 @@ async function runLive(options, lib) {
   return { checker, sites };
 }
 
-(async () => {
+async function main() {
   let options;
   try {
     options = parseArgs(process.argv.slice(2));
@@ -1755,4 +1755,9 @@ async function runLive(options, lib) {
   );
 
   process.exit(report.exitCode);
-})();
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 2;
+});

@@ -136,7 +136,7 @@ export abstract class ScreenshotBase {
 
       const screenshotBuffer = await page.screenshot({
         fullPage: this.screenshotConfig.fullPage ?? true,
-        type: this.screenshotConfig.format as 'png' | 'jpeg',
+        type: this.screenshotConfig.format ?? 'png',
         quality:
           this.screenshotConfig.format === 'jpeg'
             ? (this.screenshotConfig.quality ?? 80)
@@ -547,7 +547,6 @@ export interface INsmSearchQuery {
 export class NsmLmSts extends ScreenshotBase {
   private readonly httpClient: HttpClient;
   private readonly parser: NsmLmStsParser;
-  private readonly detailTitleConcurrency: number;
   private readonly hydrateTruncatedTitles: boolean;
 
   constructor(config?: PalCrawlConfig) {
@@ -559,7 +558,6 @@ export class NsmLmSts extends ScreenshotBase {
       customHeaders: config?.customHeaders ?? {},
     });
     this.parser = new NsmLmStsParser();
-    this.detailTitleConcurrency = 4;
     this.hydrateTruncatedTitles = config?.hydrateTruncatedTitles ?? false;
   }
 
@@ -567,57 +565,25 @@ export class NsmLmSts extends ScreenshotBase {
     return billName.includes('...') || billName.includes('…');
   }
 
-  /**
-   * 목록의 잘린 제목을 상세 페이지 제목으로 보정합니다.
-   * 상세 조회 실패 시에는 기존 제목을 유지합니다.
-   */
+  /** Preserve list titles when optional detail lookup fails. Requests are sequential. */
   private async hydrateBillNamesFromDetail(
     items: INsmBillItem[],
   ): Promise<INsmBillItem[]> {
-    if (items.length === 0) {
-      return items;
-    }
-
-    const normalizedConcurrency = Math.max(1, this.detailTitleConcurrency);
     const hydrated = items.map((item) => ({ ...item }));
-    const truncatedItems = hydrated.filter((item) =>
-      this.isTruncatedBillName(item.billName),
-    );
-
-    if (truncatedItems.length === 0) {
-      return hydrated;
+    for (const item of hydrated) {
+      if (!item.billNo || !this.isTruncatedBillName(item.billName)) {
+        continue;
+      }
+      try {
+        const detailHtml = await this.getDetailHTML(item.billNo);
+        const detailTitle = this.parser.parseDetail(detailHtml).title.trim();
+        if (detailTitle) {
+          item.billName = detailTitle;
+        }
+      } catch {
+        // Optional hydration must preserve the original list title on failure.
+      }
     }
-
-    for (
-      let startIndex = 0;
-      startIndex < truncatedItems.length;
-      startIndex += normalizedConcurrency
-    ) {
-      const chunk = truncatedItems.slice(
-        startIndex,
-        startIndex + normalizedConcurrency,
-      );
-
-      await Promise.all(
-        chunk.map(async (item) => {
-          if (!item.billNo) {
-            return;
-          }
-
-          try {
-            const detailHtml = await this.getDetailHTML(item.billNo);
-            const detail = this.parser.parseDetail(detailHtml);
-            const detailTitle = detail.title.trim();
-            if (detailTitle) {
-              item.billName = detailTitle;
-            }
-          } catch {
-            // Keep list title when detail lookup fails.
-          }
-        }),
-      );
-    }
-
     return hydrated;
   }
 

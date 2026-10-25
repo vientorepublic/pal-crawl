@@ -112,7 +112,7 @@ PR마다 `Contract check (pull requests)`가 이 계약을 실사이트와 대�
 3. `npm run drift:contracts`로 대조 통과를 확인한다(네트워크 불필요, PR CI에서도 돈다).
 4. 실사이트 확인이 필요하면 `npm run build && npm run drift:check`
    (일부만: `npm run drift:check -- --sites likms`).
-5. 사이트가 **실제로** 바뀐 것이면 `agent_memories/site-notes/`에 기록하고
+5. 사이트가 **실제로** 바뀐 것이면 `agent_memories/NN-topic-name/`에 기록하고 `agent_memories/README.md`에 연결한 뒤
    `src/*.test.ts` fixture를 실제 캡처로 갱신한다.
 
 > 오탐(빈 값이 정상인 자리, 조건부로만 나오는 요소)을 계약에 넣으면 매일 알림이

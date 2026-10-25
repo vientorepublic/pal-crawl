@@ -224,7 +224,7 @@ describe('LikmsNsmAdapter', () => {
       expect(postCount()).toBe(0);
     });
 
-    test('does not reject an empty scPpsUsr (필터 없음과 같다)', async () => {
+    test('accepts an empty proposer filter', async () => {
       const { adapter, postBody } = setup();
 
       await adapter.search({ scPpsUsr: '   ' });
@@ -233,15 +233,15 @@ describe('LikmsNsmAdapter', () => {
       expect(postBody().has('representId')).toBe(false);
     });
 
-    test('maps each NSM 발의구분 code onto a likms proposerKind', async () => {
-      const cases: Array<[string, string]> = [
+    test('maps each NSM proposer type to a LIKMS proposerKind', async () => {
+      const cases: Array<[NonNullable<INsmSearchQuery['sgtCls']>, string]> = [
         ['900201', 'GOV'],
         ['900202', 'MEMASEMBY'],
         ['900203', 'CHRPR'],
       ];
       for (const [sgtCls, expected] of cases) {
         const { adapter, postBody } = setup();
-        await adapter.search({ sgtCls: sgtCls as '900201' });
+        await adapter.search({ sgtCls });
         expect(postBody().get('proposerKind')).toBe(expected);
         jest.restoreAllMocks();
       }
@@ -289,7 +289,7 @@ describe('LikmsNsmAdapter', () => {
       expect(body.get('stateId')).toBe('mooring');
     });
 
-    test('resolves scCptPpostCmt onto the likms 소관위 code', async () => {
+    test('resolves scCptPpostCmt to the LIKMS committee code', async () => {
       const { adapter, postBody, committeeGets } = setup();
 
       await adapter.search({
@@ -307,7 +307,7 @@ describe('LikmsNsmAdapter', () => {
       expect(body.get('ageFrom')).toBe('22');
     });
 
-    test('matches a committee name ignoring the 대수 suffix and whitespace', async () => {
+    test('matches a committee name ignoring the assembly-term suffix and whitespace', async () => {
       const { adapter, postBody } = setup();
 
       await adapter.search({ scCptPpostCmt: ' 교육 위원회 ' });
@@ -462,7 +462,7 @@ describe('LikmsNsmAdapter', () => {
       jest.restoreAllMocks();
     });
 
-    test('scans forward and returns only 접수 items (NSM shape)', async () => {
+    test('scans forward and returns only receipt-stage items in NSM format', async () => {
       const adapter = new LikmsNsmAdapter();
       const httpClient = getHttpClient(adapter);
       jest.spyOn(httpClient, 'get').mockResolvedValue(STATE_PAGE_HTML);
@@ -548,7 +548,7 @@ describe('LikmsNsmAdapter', () => {
       expect(detail.attachments).toHaveLength(0);
     });
 
-    test('parses the billInfo fragment (접수정보·제안이유·문서)', () => {
+    test('parses receipt information, proposal reason, and documents from the billInfo fragment', () => {
       const adapter = new LikmsNsmAdapter();
       const detail = adapter.parseDetail(LIKMS_BILL_INFO_HTML_AUDIT);
 
@@ -942,7 +942,12 @@ const detailPortIsSubsetOfNsmLmSts: DetailPortKeysMissingFromNsmLmSts extends ne
   ? true
   : never = true;
 
-describe('NsmLmSts 호환성 감사', () => {
+const getFieldTypes = (value: object): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, typeof entry]),
+  );
+
+describe('NsmLmSts compatibility audit', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
@@ -961,24 +966,12 @@ describe('NsmLmSts 호환성 감사', () => {
     const nsmOut = await runCallerFlow(nsm);
     const likmsOut = await runCallerFlow(adapter);
 
-    const nsmResult = nsmOut.searched as unknown as Record<string, unknown>;
-    const likmsResult = likmsOut.searched as unknown as Record<string, unknown>;
-    expect(Object.keys(likmsResult).sort()).toEqual(
-      Object.keys(nsmResult).sort(),
+    expect(getFieldTypes(likmsOut.searched)).toEqual(
+      getFieldTypes(nsmOut.searched),
     );
-
-    const nsmItem = nsmOut.searched.items[0] as unknown as Record<
-      string,
-      unknown
-    >;
-    const likmsItem = likmsOut.searched.items[0] as unknown as Record<
-      string,
-      unknown
-    >;
-    expect(Object.keys(likmsItem).sort()).toEqual(Object.keys(nsmItem).sort());
-    for (const key of Object.keys(nsmItem)) {
-      expect(typeof likmsItem[key]).toBe(typeof nsmItem[key]);
-    }
+    const nsmItem = nsmOut.searched.items[0];
+    const likmsItem = likmsOut.searched.items[0];
+    expect(getFieldTypes(likmsItem)).toEqual(getFieldTypes(nsmItem));
 
     expect(typeof likmsOut.html).toBe('string');
     expect(likmsOut.parsed.items).toHaveLength(nsmOut.parsed.items.length);
@@ -1071,15 +1064,9 @@ describe('NsmLmSts 호환성 감사', () => {
     expect(Object.keys(likmsPending).sort()).toEqual(
       Object.keys(nsmPending).sort(),
     );
-    const nsmItem = nsmPending.items[0] as unknown as Record<string, unknown>;
-    const likmsItem = likmsPending.items[0] as unknown as Record<
-      string,
-      unknown
-    >;
-    expect(Object.keys(likmsItem).sort()).toEqual(Object.keys(nsmItem).sort());
-    for (const key of Object.keys(nsmItem)) {
-      expect(typeof likmsItem[key]).toBe(typeof nsmItem[key]);
-    }
+    const nsmItem = nsmPending.items[0];
+    const likmsItem = likmsPending.items[0];
+    expect(getFieldTypes(likmsItem)).toEqual(getFieldTypes(nsmItem));
 
     // 진행상태 어휘는 다르다(NSM '발의' ↔ likms '접수').
     expect(nsmItem.progressStatus).toBe('발의');
@@ -1117,11 +1104,7 @@ describe('NsmLmSts 호환성 감사', () => {
     expect(Object.keys(likmsDetail).sort()).toEqual(
       Object.keys(nsmDetail).sort(),
     );
-    for (const key of Object.keys(nsmDetail)) {
-      expect(typeof likmsDetail[key as keyof INsmBillDetail]).toBe(
-        typeof nsmDetail[key as keyof INsmBillDetail],
-      );
-    }
+    expect(getFieldTypes(likmsDetail)).toEqual(getFieldTypes(nsmDetail));
     expect(likmsDetail.attachments[0]).toEqual({
       filename: expect.any(String),
       fileId: expect.any(String),

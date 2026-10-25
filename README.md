@@ -77,13 +77,13 @@ npm install pal-crawl
 
 ## Configuration
 
-`PalCrawl` 클래스는 생성자에서 선택적 설정 객체를 받을 수 있습니다.
+`PalCrawl` 클래스는 생성자에서 선택적 설정 객체를 받을 수 있습니다. `retryCount`는 기존 동작과 같이 최대 요청 시도 횟수를 뜻하며, `0`이면 요청을 한 번 수행하고 재시도하지 않습니다. 음수·소수·무한대 등 유효하지 않은 값은 생성 시 오류로 알립니다.
 
 ```typescript
 interface PalCrawlConfig {
   userAgent?: string; // 사용자 정의 User-Agent (기본값: Chrome User-Agent)
   timeout?: number; // HTTP 요청 타임아웃 (밀리초, 기본값: 10000)
-  retryCount?: number; // 재시도 횟수 (기본값: 3)
+  retryCount?: number; // Maximum attempts (default: 3; 0 makes one attempt)
   customHeaders?: Record<string, string>; // 사용자 정의 헤더
   screenshot?: ScreenshotOptions; // 헤드리스 크로뮴 스크린샷 옵션
   hydrateTruncatedTitles?: boolean; // 잘린 제목 상세 조회 여부 (기본값: false)
@@ -491,7 +491,7 @@ for await (const page of palCrawl.getAllDonePages(
 
 ## NsmLmSts - 국민참여입법센터 국회입법현황
 
-`NsmLmSts` 클래스는 [국민참여입법센터 국회입법현황](https://opinion.lawmaking.go.kr/gcom/nsmLmSts/out)에서 법안 목록과 상세 정보를 크롤링합니다. 위원회 회부 이전 발의 상태 법안까지 필터링할 수 있는 것이 특징입니다. 목록 검색은 기본적으로 목록 페이지만 요청하며, `...`으로 잘린 제목을 상세 페이지에서 보정하려면 `hydrateTruncatedTitles: true`를 명시해야 합니다.
+`NsmLmSts` 클래스는 [국민참여입법센터 국회입법현황](https://opinion.lawmaking.go.kr/gcom/nsmLmSts/out)에서 법안 목록과 상세 정보를 크롤링합니다. 위원회 회부 이전 발의 상태 법안까지 필터링할 수 있는 것이 특징입니다. 목록 검색은 기본적으로 목록 페이지만 요청하며, `...`으로 잘린 제목을 상세 페이지에서 보정하려면 `hydrateTruncatedTitles: true`를 명시해야 합니다. 제목 보정 요청은 순차적으로 실행하며, 실패한 항목의 기존 제목은 유지합니다.
 
 ---
 
@@ -1034,6 +1034,8 @@ const parsed = crawler.parseList(fragment); // 목록 조각 → 객체
 > 계류의안 목록의 `billId`는 PAL의 `contentId`와 동일하므로, 목록에 제안이유 링크가 있을 때(`hasProposalReason`) `LikmsCrawler.getProposalReason(billId)`로 제안이유를 조회할 수 있습니다.
 
 ### 실제 네트워크 통합 테스트 (opt-in)
+
+기본 `npm test`는 PAL·NSM·LIKMS 응답 fixture와 HTTP mock을 사용하며 실사이트를 호출하지 않습니다. HTTP 재시도·응답 중단·인코딩 폴백도 mock 전송 계층에서 검증합니다.
 
 `src/likms.live.test.ts`는 기본적으로 skip되며, 환경변수로만 실행됩니다(토큰 재발급, 페이지 경계, 필터 검증 포함).
 

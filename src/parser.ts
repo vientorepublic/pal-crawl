@@ -61,7 +61,7 @@ export class PalParser {
       if (subject) {
         const link = $(el).find('td.td_block > a.board_subject').attr('href');
         const numComments = Number(
-          $(el).find('td:nth-child(8)').text().replace(',', '').trim(),
+          $(el).find('td:nth-child(8)').text().replace(/,/g, '').trim(),
         );
         const proposerCategory = $(el).find('td:nth-child(3)').text().trim();
         const committee = $(el).find('td:nth-child(4)').text().trim();
@@ -80,11 +80,11 @@ export class PalParser {
         };
         const contentId = boardLink ? this.extractContentId(boardLink) : null;
         output.push({
-          num,
+          num: Number.isFinite(num) ? num : 0,
           subject,
           proposerCategory,
           committee,
-          numComments,
+          numComments: Number.isFinite(numComments) ? numComments : 0,
           link: boardLink,
           contentId,
           attachments,
@@ -111,7 +111,7 @@ export class PalParser {
         totalPages = parseInt(m[2], 10);
         const strong = $(el).prevAll('strong').first();
         if (strong.length) {
-          total = parseInt(strong.text().replace(/,/g, ''), 10);
+          total = parseInt(strong.text().replace(/,/g, ''), 10) || 0;
         }
         return false; // break
       }
@@ -706,8 +706,8 @@ export class LikmsStateParser {
     const pagesText = $('#pager_pages_text').attr('value') ?? '';
     const pagesMatch = pagesText.match(/\(([\d,]+)\s*\/\s*([\d,]+)\s*페이지\)/);
     if (pagesMatch) {
-      currentPage = parseInt(pagesMatch[1].replace(/,/g, ''), 10);
-      totalPages = parseInt(pagesMatch[2].replace(/,/g, ''), 10);
+      currentPage = parseInt(pagesMatch[1].replace(/,/g, ''), 10) || 1;
+      totalPages = parseInt(pagesMatch[2].replace(/,/g, ''), 10) || 0;
     }
 
     if (totalPages === 0 && items.length > 0) {
@@ -774,30 +774,37 @@ export class LikmsStateParser {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
-    } catch (error) {
-      if (error instanceof SyntaxError) {
-        return [];
-      }
-      throw error;
-    }
-
-    if (typeof parsed !== 'object' || parsed === null) {
+    } catch {
+      // Parsing malformed input must not expose exceptions to consumers.
       return [];
     }
-    const list = (parsed as Record<string, unknown>).ageCmtList;
+
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      !('ageCmtList' in parsed)
+    ) {
+      return [];
+    }
+    const list = parsed.ageCmtList;
     if (!Array.isArray(list)) {
       return [];
     }
 
     const committees: ILikmsCommittee[] = [];
-    for (const entry of list) {
-      if (typeof entry !== 'object' || entry === null) {
+    const entries: unknown[] = list;
+    for (const entry of entries) {
+      if (
+        typeof entry !== 'object' ||
+        entry === null ||
+        !('comCd' in entry) ||
+        !('comCdName' in entry)
+      ) {
         continue;
       }
-      const record = entry as Record<string, unknown>;
-      const comCd = typeof record.comCd === 'string' ? record.comCd.trim() : '';
+      const comCd = typeof entry.comCd === 'string' ? entry.comCd.trim() : '';
       const comCdName =
-        typeof record.comCdName === 'string' ? record.comCdName.trim() : '';
+        typeof entry.comCdName === 'string' ? entry.comCdName.trim() : '';
       if (!comCd || !comCdName) {
         continue;
       }
@@ -805,7 +812,12 @@ export class LikmsStateParser {
       committees.push({
         comCd,
         comCdName,
-        cdOrd: typeof record.cdOrd === 'number' ? record.cdOrd : null,
+        cdOrd:
+          'cdOrd' in entry &&
+          typeof entry.cdOrd === 'number' &&
+          Number.isFinite(entry.cdOrd)
+            ? entry.cdOrd
+            : null,
       });
     }
 

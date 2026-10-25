@@ -1,6 +1,6 @@
 {
   "name": "pal-crawl",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "국회입법예고(pal.assembly.go.kr)의 진행 중인 입법 예고 크롤러",
   "license": "MIT",
   "author": "vientorepublic",
@@ -60,5 +60,10 @@
     "testMatch": [
       "**/*.test.ts"
     ]
+  },
+  "allowScripts": {
+    "puppeteer@25.13.0": true,
+    "@parcel/watcher@2.6.0": true,
+    "unrs-resolver@1.12.2": true
   }
 }
