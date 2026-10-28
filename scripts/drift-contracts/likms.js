@@ -239,9 +239,9 @@ module.exports = {
           pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           label: '제안일자',
         },
-        // 소관위(`td.currCmt`)는 **위원회 회부 전이면 빈 문자열**이 정상이다
-        // (실측 2026-10-14: 1페이지 50건 중 12건이 빈 값). 채워짐 여부는
-        // `likms.listCoverage`가 비율로 보고하고, 파싱이 통째로 죽었는지만 본다.
+        // Pre-referral bills may fill the entire newest page (2026-10-29).
+        // listCoverage requires each committee cell and compares its source
+        // text with the parsed value; state-filters checks assigned committees.
         {
           path: 'items[0].link',
           label: '상세 링크',
