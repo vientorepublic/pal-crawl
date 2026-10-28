@@ -950,11 +950,9 @@ const EXTRAS = {
   },
 
   /**
-   * 목록에서 "조용히 꺼지는 경로"를 비율로 감시한다.
-   * - 대표발의자 이름: 뽑히지 않으면 의원 해석·동명이인 후보 점검의 전제가 무너진다.
-   * - 소관위 표기: 회부 전 건은 빈 값이 정상이므로 **전부 빈 값일 때만** 이상으로 본다.
-   * - 제안이유 팝업 링크(`hasProposalReason`): onclick 이름이 바뀌면 전부 false가 되어
-   *   likms 제안이유 보정 경로가 소리 없이 꺼진다.
+   * Compare committee values with source cells, including pre-referral blanks.
+   * Report coverage without requiring any referrals on the newest page.
+   * Keep monitoring proposal-reason links used by optional hydration.
    */
   'likms.listCoverage'(env) {
     const items = resolveFirst(env.scope, 'items') ?? [];
@@ -966,10 +964,29 @@ const EXTRAS = {
     ).length;
     const withReason = items.filter((item) => item.hasProposalReason).length;
 
-    expect(
-      items.length === 0 || withCommittee > 0,
-      '목록 50건 모두 소관위가 비었습니다(`td.currCmt` 파싱 확인)',
-    );
+    const $ = cheerio.load(env.context.likmsListHtml ?? '');
+    const rows = new Map();
+    $('#state-list tbody tr').each((_, row) => {
+      const billId = $(row)
+        .find('td.align_left a[data-bill-id]')
+        .first()
+        .attr('data-bill-id')
+        ?.trim();
+      if (billId) {
+        rows.set(billId, $(row));
+      }
+    });
+    for (const item of items) {
+      const cell = rows.get(item.billId)?.find('td.currCmt');
+      expect(
+        cell?.length === 1,
+        `${item.billId}: 소관위 셀(td.currCmt)이 없거나 중복되었습니다`,
+      );
+      expect(
+        item.committee === cell.text().trim(),
+        `${item.billId}: 소관위 원문과 파싱 결과가 다릅니다(td.currCmt)`,
+      );
+    }
     expect(
       items.length === 0 || withReason > 0,
       '제안이유 팝업 링크(a[onclick*=openSummaryPopup])가 한 건도 잡히지 않았습니다 — likms 보정 경로가 꺼집니다',
@@ -1132,6 +1149,35 @@ const SELF_TEST_GOOD_HTML =
 
 const SELF_TEST_LIB = { Config: { DOMAIN: 'https://example.test' } };
 
+// Reduced live row structure captured on 2026-10-29; no referrals are required.
+function checkCommitteeFixture(
+  sourceCommittee,
+  parsedCommittee,
+  cellClass = 'currCmt',
+) {
+  const items = Array.from({ length: 50 }, (_, index) => ({
+    billId: `PRC_TEST_${index}`,
+    committee: parsedCommittee,
+    proposer: 'Test의원 등 10인',
+    hasProposalReason: true,
+  }));
+  const html =
+    '<div id="state-list"><table><tbody>' +
+    items
+      .map(
+        (item) =>
+          `<tr><td class="align_left"><a data-bill-id="${item.billId}">Bill</a></td>` +
+          `<td class="${cellClass} mnone">${sourceCommittee}</td>` +
+          '<td class="procStageName mnone" title="접수">접수</td></tr>',
+      )
+      .join('') +
+    '</tbody></table></div>';
+  return EXTRAS['likms.listCoverage']({
+    scope: { items },
+    context: { likmsListHtml: html },
+  });
+}
+
 const SELF_TEST_CASES = [
   {
     id: 'self/good-selector',
@@ -1202,6 +1248,30 @@ const SELF_TEST_CASES = [
     },
   },
   {
+    id: 'self/committee-all-unassigned',
+    label: 'accepts a full page of pre-referral bills',
+    expected: 'ok',
+    run: () => checkCommitteeFixture('', ''),
+  },
+  {
+    id: 'self/committee-populated',
+    label: 'accepts parsed committees matching source cells',
+    expected: 'ok',
+    run: () => checkCommitteeFixture(' 법제사법위원회 ', '법제사법위원회'),
+  },
+  {
+    id: 'self/committee-value-lost',
+    label: 'detects populated source committees lost by parsing',
+    expected: 'drift',
+    run: () => checkCommitteeFixture('법제사법위원회', ''),
+  },
+  {
+    id: 'self/committee-cell-renamed',
+    label: 'detects missing committee cells even when values are empty',
+    expected: 'drift',
+    run: () => checkCommitteeFixture('', '', 'renamedCommittee'),
+  },
+  {
     id: 'self/timeout',
     label: '타임아웃은 확인 불가(error)여야 한다',
     expected: 'error',
@@ -1228,7 +1298,7 @@ async function runSelfTest() {
 
   // 분류·집계·종료 코드 규칙 검증
   const counts = checker.counts;
-  const expectedCounts = { ok: 1, drift: 5, inconclusive: 1 };
+  const expectedCounts = { ok: 3, drift: 7, inconclusive: 1 };
   for (const [key, expected] of Object.entries(expectedCounts)) {
     if (counts[key] !== expected) {
       failures.push(`집계 ${key}: 기대 ${expected}, 실제 ${counts[key]}`);
@@ -1348,7 +1418,7 @@ async function runSelfTest() {
   if (!markdown.includes(SELF_TEST_CASES[1].id) && !markdown.includes('renamed')) {
     failures.push('Markdown 리포트에 drift 항목이 없습니다');
   }
-  if (!json.includes('"drift"') || report.drift.length !== 5) {
+  if (!json.includes('"drift"') || report.drift.length !== 7) {
     failures.push('JSON 리포트에 drift 항목이 없습니다');
   }
 
