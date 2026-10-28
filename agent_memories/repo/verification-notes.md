@@ -33,3 +33,14 @@ Ordinary PAL/NSM request tests now use fixtures and HTTP mocks; a PAL-suite tran
 The archived retryCount-zero behavior was reproduced and fixed in `src/http-client.ts`: zero now makes one request, positive values keep the existing maximum-attempt interpretation, and invalid numeric counts fail before transport. Regression coverage is in `src/http-client.test.ts`. Do not treat the old activity-log observation as an outstanding defect.
 
 The archive's npm OTP and tarball observations were not reverified. Inspect current source, registry, and environment before using them as present-tense facts.
+
+## LIKMS committee coverage (2026-10-29)
+
+The newest state-list page may contain only pre-referral bills with empty
+`td.currCmt` cells. Do not require a positive committee coverage ratio.
+`likms.listCoverage` instead requires one committee cell per parsed bill and
+compares its text by bill ID; `likms/state-filters` verifies populated names on a
+committee-filtered result. The parser itself needed no change. See the
+[contract correction](../04-likms-committee-contract/change.md) for live evidence
+and final validation. The four added offline cases distinguish legitimate blanks
+from renamed cells and lost parsed values.
