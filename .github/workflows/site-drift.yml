@@ -61,7 +61,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
       - name: Install dependencies
         run: npm ci
       # 계약 매니페스트와 src가 어긋나면(파서만 고친 경우) 실사이트 점검 전에 멈춘다.
