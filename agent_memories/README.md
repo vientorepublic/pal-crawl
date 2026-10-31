@@ -1,6 +1,6 @@
 # Shared Agent Memory Index
 
-Last reviewed: 2026-10-29
+Last reviewed: 2026-10-31
 
 Read [AGENTS.md](../AGENTS.md) and this index before non-trivial work. These notes are versioned repository context, not synchronization of private chats. Current source and explicit user instructions take precedence over historical notes.
 
@@ -11,6 +11,8 @@ Read [AGENTS.md](../AGENTS.md) and this index before non-trivial work. These not
 - [Verification notes](repo/verification-notes.md) — current, source-reviewed 2026-10-25; actual commands, offline/live separation, and limitations. Read before validation.
 
 ## Topic investigations and plans
+
+- [05 — Empty detail reasons](05-empty-detail-reasons/change.md) — resolved locally; valid empty NSM/LIKMS reasons accepted; 247 tests, 30 self-tests, and all 18 live contracts passed; patch 2.3.3 GitHub release and post-merge workflow authorized; npm excluded.
 
 - [04 — LIKMS committee contract](04-likms-committee-contract/change.md) — active release; false positive fixed, 16 self-tests and all 18 live contracts passed; GitHub integration and post-release dispatch authorized, npm excluded.
 

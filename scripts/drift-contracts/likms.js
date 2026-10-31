@@ -397,7 +397,8 @@ module.exports = {
         {
           selector: '#prntSummary',
           usedBy: 'src/parser.ts',
-          note: '제안이유 및 주요내용 본문',
+          live: false,
+          note: 'Conditional reason body; reasonConsistency requires it when advertised',
         },
         {
           selector: '#insc-rcp-row td.billNo span',

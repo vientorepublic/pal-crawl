@@ -910,18 +910,18 @@ const EXTRAS = {
     return `제안이유 ${env.scope.proposalReason.length}자`;
   },
 
-  /** 상세 조각의 제안이유 본문이 있는데 파싱이 null이면 구조 변경 신호다. */
+  /** Only nonempty reason cells require a parsed value; empty pre tags are valid. */
   'nsm.reasonConsistency'(env) {
     const $ = cheerio.load(env.context.nsmDetailHtml ?? '');
-    const hasHeader = $('th')
-      .map((_, el) => $(el).text().replace(/\s+/g, ''))
-      .get()
-      .some((header) => header.includes('제안이유'));
-    const hasReasonBody = $('pre').length > 0;
-    if (hasHeader && hasReasonBody) {
+    const cells = $('th')
+      .filter((_, el) => $(el).text().replace(/\s+/g, '').includes('제안이유'))
+      .closest('tr')
+      .find('td');
+    if (cells.text().trim() !== '') {
       expect(
-        env.scope.proposalReason !== null,
-        '제안이유 헤더·본문은 있는데 파싱 결과가 null입니다',
+        typeof env.scope.proposalReason === 'string' &&
+          env.scope.proposalReason.trim() !== '',
+        '제안이유 본문은 있는데 파싱 결과가 비어 있습니다',
       );
     }
     return env.scope.proposalReason === null
@@ -929,21 +929,26 @@ const EXTRAS = {
       : `제안이유 ${env.scope.proposalReason.length}자`;
   },
 
-  /** `#prntSummary` 본문은 있는데 파싱이 null이면 구조 변경 신호다. */
+  /** Require the reason selector when the list or fragment advertises a reason. */
   'likms.reasonConsistency'(env) {
-    const raw = cheerio
-      .load(env.context.likmsFragmentHtml ?? '')('#prntSummary')
-      .text()
-      .trim();
-    if (raw !== '') {
+    const $ = cheerio.load(env.context.likmsFragmentHtml ?? '');
+    const summary = $('#prntSummary');
+    const hasHeading = $('h4')
+      .toArray()
+      .some((el) => $(el).text().replace(/\s+/g, '').includes('제안이유'));
+    if (env.scope.item?.hasProposalReason || hasHeading) {
       expect(
-        env.scope.reason !== null,
-        '#prntSummary 본문은 있는데 제안이유 파싱이 null입니다(구조 변경 의심)',
+        summary.length > 0,
+        '제안이유가 표시된 의안에서 #prntSummary가 없습니다',
       );
     }
-    const docAnchors = cheerio
-      .load(env.context.likmsFragmentHtml ?? '')('#insc-rcp-row td.doc a')
-      .length;
+    if (env.scope.item?.hasProposalReason || summary.text().trim() !== '') {
+      expect(
+        typeof env.scope.reason === 'string' && env.scope.reason.trim() !== '',
+        '제안이유 본문 또는 목록 링크는 있는데 파싱 결과가 비어 있습니다',
+      );
+    }
+    const docAnchors = $('#insc-rcp-row td.doc a').length;
     return `문서 링크 ${docAnchors}개 · 제안이유 ${
       env.scope.reason === null ? 'null' : `${env.scope.reason.length}자`
     }`;
@@ -1240,6 +1245,173 @@ const SELF_TEST_CASES = [
       ),
   },
   {
+    id: 'self/nsm-reason-empty-pre',
+    label: 'NSM reason empty-pre',
+    expected: 'ok',
+    run: () =>
+      EXTRAS['nsm.reasonConsistency']({
+        context: {
+          nsmDetailHtml:
+            '<table><tr><th>제안이유 및 주요내용</th><td><pre></pre></td></tr></table>',
+        },
+        scope: { proposalReason: null },
+      }),
+  },
+  {
+    id: 'self/nsm-reason-whitespace-pre',
+    label: 'NSM reason whitespace-pre',
+    expected: 'ok',
+    run: () =>
+      EXTRAS['nsm.reasonConsistency']({
+        context: {
+          nsmDetailHtml:
+            '<table><tr><th>제안이유 및 주요내용</th><td><pre> \n&nbsp;<br></pre></td></tr></table>',
+        },
+        scope: { proposalReason: null },
+      }),
+  },
+  {
+    id: 'self/nsm-reason-populated-pre',
+    label: 'NSM reason populated-pre',
+    expected: 'ok',
+    run: () =>
+      EXTRAS['nsm.reasonConsistency']({
+        context: {
+          nsmDetailHtml:
+            '<table><tr><th>제안이유 및 주요내용</th><td><pre>Reason</pre></td></tr></table>',
+        },
+        scope: { proposalReason: 'Reason' },
+      }),
+  },
+  {
+    id: 'self/nsm-reason-lost-pre',
+    label: 'NSM reason lost-pre',
+    expected: 'drift',
+    run: () =>
+      EXTRAS['nsm.reasonConsistency']({
+        context: {
+          nsmDetailHtml:
+            '<table><tr><th>제안이유 및 주요내용</th><td><pre>Reason</pre></td></tr></table>',
+        },
+        scope: { proposalReason: null },
+      }),
+  },
+  {
+    id: 'self/nsm-reason-plain-cell',
+    label: 'NSM reason plain-cell',
+    expected: 'ok',
+    run: () =>
+      EXTRAS['nsm.reasonConsistency']({
+        context: {
+          nsmDetailHtml:
+            '<table><tr><th>제안이유 및 주요내용</th><td>Reason</td></tr></table>',
+        },
+        scope: { proposalReason: 'Reason' },
+      }),
+  },
+  {
+    id: 'self/nsm-reason-lost-plain-cell',
+    label: 'NSM reason lost-plain-cell',
+    expected: 'drift',
+    run: () =>
+      EXTRAS['nsm.reasonConsistency']({
+        context: {
+          nsmDetailHtml:
+            '<table><tr><th>제안이유 및 주요내용</th><td>Reason</td></tr></table>',
+        },
+        scope: { proposalReason: null },
+      }),
+  },
+  {
+    id: 'self/nsm-reason-unrelated-pre',
+    label: 'NSM reason unrelated-pre',
+    expected: 'ok',
+    run: () =>
+      EXTRAS['nsm.reasonConsistency']({
+        context: {
+          nsmDetailHtml:
+            '<table><tr><th>제안이유 및 주요내용</th><td></td></tr></table><pre>Other section</pre>',
+        },
+        scope: { proposalReason: null },
+      }),
+  },
+  {
+    id: 'self/likms-reason-absent',
+    label: 'LIKMS reason absent',
+    expected: 'ok',
+    run: () =>
+      EXTRAS['likms.reasonConsistency']({
+        context: { likmsFragmentHtml: '<pre class="bill_memo">Memo</pre>' },
+        scope: { item: { hasProposalReason: false }, reason: null },
+      }),
+  },
+  {
+    id: 'self/likms-reason-present',
+    label: 'LIKMS reason present',
+    expected: 'ok',
+    run: () =>
+      EXTRAS['likms.reasonConsistency']({
+        context: {
+          likmsFragmentHtml:
+            '<h4>제안이유 및 주요내용</h4><pre id="prntSummary">Reason</pre>',
+        },
+        scope: { item: { hasProposalReason: true }, reason: 'Reason' },
+      }),
+  },
+  {
+    id: 'self/likms-reason-lost-value',
+    label: 'LIKMS reason lost-value',
+    expected: 'drift',
+    run: () =>
+      EXTRAS['likms.reasonConsistency']({
+        context: { likmsFragmentHtml: '<pre id="prntSummary">Reason</pre>' },
+        scope: { item: { hasProposalReason: false }, reason: null },
+      }),
+  },
+  {
+    id: 'self/likms-reason-missing-selector',
+    label: 'LIKMS reason missing-selector',
+    expected: 'drift',
+    run: () =>
+      EXTRAS['likms.reasonConsistency']({
+        context: { likmsFragmentHtml: '<pre id="renamed">Reason</pre>' },
+        scope: { item: { hasProposalReason: true }, reason: null },
+      }),
+  },
+  {
+    id: 'self/likms-reason-renamed-with-heading',
+    label: 'LIKMS reason renamed-with-heading',
+    expected: 'drift',
+    run: () =>
+      EXTRAS['likms.reasonConsistency']({
+        context: {
+          likmsFragmentHtml:
+            '<h4>제안이유 및 주요내용</h4><pre id="renamed">Reason</pre>',
+        },
+        scope: { item: { hasProposalReason: false }, reason: null },
+      }),
+  },
+  {
+    id: 'self/likms-reason-advertised-but-empty',
+    label: 'LIKMS reason advertised-but-empty',
+    expected: 'drift',
+    run: () =>
+      EXTRAS['likms.reasonConsistency']({
+        context: { likmsFragmentHtml: '<pre id="prntSummary"></pre>' },
+        scope: { item: { hasProposalReason: true }, reason: null },
+      }),
+  },
+  {
+    id: 'self/likms-reason-empty',
+    label: 'LIKMS reason empty',
+    expected: 'ok',
+    run: () =>
+      EXTRAS['likms.reasonConsistency']({
+        context: { likmsFragmentHtml: '<pre id="prntSummary"></pre>' },
+        scope: { item: { hasProposalReason: false }, reason: null },
+      }),
+  },
+  {
     id: 'self/http-5xx',
     label: '재시도 후 5xx는 drift여야 한다(엔드포인트 변경 신호)',
     expected: 'drift',
@@ -1298,7 +1470,14 @@ async function runSelfTest() {
 
   // 분류·집계·종료 코드 규칙 검증
   const counts = checker.counts;
-  const expectedCounts = { ok: 3, drift: 7, inconclusive: 1 };
+  const expectedCounts = {
+    ok: SELF_TEST_CASES.filter((testCase) => testCase.expected === 'ok').length,
+    drift: SELF_TEST_CASES.filter((testCase) => testCase.expected === 'drift')
+      .length,
+    inconclusive: SELF_TEST_CASES.filter(
+      (testCase) => testCase.expected === 'error',
+    ).length,
+  };
   for (const [key, expected] of Object.entries(expectedCounts)) {
     if (counts[key] !== expected) {
       failures.push(`집계 ${key}: 기대 ${expected}, 실제 ${counts[key]}`);
@@ -1418,7 +1597,7 @@ async function runSelfTest() {
   if (!markdown.includes(SELF_TEST_CASES[1].id) && !markdown.includes('renamed')) {
     failures.push('Markdown 리포트에 drift 항목이 없습니다');
   }
-  if (!json.includes('"drift"') || report.drift.length !== 7) {
+  if (!json.includes('"drift"') || report.drift.length !== expectedCounts.drift) {
     failures.push('JSON 리포트에 drift 항목이 없습니다');
   }
 
