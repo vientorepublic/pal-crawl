@@ -205,7 +205,7 @@ module.exports = {
           selector: 'pre',
           usedBy: 'src/parser.ts',
           live: false,
-          note: '제안이유 본문 — 섹션이 비어 있는 의안에는 없다',
+          note: 'Reason body may be an empty pre; reasonConsistency checks cell text',
         },
       ],
       // 상세 페이지 표의 헤더 — "발의정보"가 사라지면 제안자·제안일 파싱이 빈다.
