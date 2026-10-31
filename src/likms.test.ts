@@ -221,6 +221,17 @@ describe('LikmsCrawler', () => {
       ).toBeNull();
     });
 
+    test('does not use supplementary notes as a missing proposal reason', () => {
+      const html = `
+        <div class="theme_list"><h3>부가정보</h3>
+          <div class="add_ds"><h4>비고</h4>
+            <pre class="bill_memo">비용추계요구서 제출됨.</pre>
+          </div>
+        </div>
+      `;
+      expect(crawler.parseProposalReason(html)).toBeNull();
+    });
+
     test('returns null when #prntSummary is empty', () => {
       expect(crawler.parseProposalReason('<pre id="prntSummary"></pre>')).toBe(
         null,

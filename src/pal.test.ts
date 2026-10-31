@@ -935,6 +935,23 @@ describe('NsmLmStsParser', () => {
       expect(detail.proposalReason).toBe('첫 번째 문장\n\n두 번째 문장');
     });
 
+    test('preserves missing reason and attachments in a newly received bill', () => {
+      const html = `
+        <h2>인공지능 데이터센터 산업 진흥에 관한 특별법 일부개정법률안</h2>
+        <table><tbody>
+          <tr><th>발의정보</th><td>한정애의원 등 11인, 제2222359호(2026. 10. 30.). 제439회 국회(정기회)</td></tr>
+          <tr><th>의안원문</th><td><ul><li class="null">첨부파일이 없습니다.</li></ul></td></tr>
+          <tr><th>제안이유 및 주요내용</th><td><pre></pre></td></tr>
+        </tbody></table>
+      `;
+      expect(parser.parseDetail(html)).toMatchObject({
+        billNo: '2222359',
+        proposer: '한정애의원 등 11인',
+        proposalReason: null,
+        attachments: [],
+      });
+    });
+
     test('returns null proposalReason when pre tag is absent', () => {
       const detail = parser.parseDetail(NSM_DETAIL_HTML_NO_REASON);
       expect(detail.proposalReason).toBeNull();
