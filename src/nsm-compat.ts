@@ -1,3 +1,4 @@
+import { LIKMS_BILL_NO_PATTERN } from './config';
 import type {
   IBulkOptions,
   INsmAttachment,
@@ -19,6 +20,8 @@ import {
   type ILikmsDetailInfo,
   type ILikmsStateBillItem,
 } from './parser';
+
+const LIKMS_BILL_NO = new RegExp(`^${LIKMS_BILL_NO_PATTERN}$`);
 
 /**
  * 상임위 **이름** 비교용 정규화.
@@ -101,7 +104,7 @@ const PROPOSER_KIND_BY_SGT_CLS: Record<string, LikmsStateProposerKind> = {
  * | `scCptPpostCmt` | `ageCmtId` | 상임위 **이름**을 `/bi/bill/sch/findAgeCmt.do` 목록에서 코드로 해석한다. 대수 범위(`sugCd`/`endSugCd`) 안에서 찾고, 이름이 없거나 여러 코드면 예외 |
  * | `searchStDtNew` / `searchEdDtNew` | `fromPropDt` / `toPropDt` | 제안일자, likms는 **양쪽 모두 줄 때만** 서버가 적용한다(한쪽만 주면 전체). NSM 쪽은 `YYYYMMDD`여야 하므로(`YYYY-MM-DD`로 두 값을 주면 0건) 그대로 옮기면 필터가 사라진다 |
  * | `sortOrder` | `ordCd` | ASC/DESC |
- * | `scBlNmSct` | `billNo`(숫자) 또는 `billNm`(문자) | 값 형태로 자동 판별 |
+ * | `scBlNmSct` | `billNo` or `billNm` | Numeric and ZZ-prefixed numbers use `billNo` |
  *
  * ## 매핑하지 않는 필드 (likms에 동일 축이 없음)
  * `rslRsltNmL`, `rslRsltNmR`(심사·의결현황), `cptOfiOrgCd`(소관부처),
@@ -250,7 +253,7 @@ export class LikmsNsmAdapter implements INsmListCrawler, INsmDetailCrawler {
     }
 
     const needle = query.scBlNmSct?.trim();
-    const looksLikeBillNo = needle !== undefined && /^[0-9]+$/.test(needle);
+    const looksLikeBillNo = needle !== undefined && LIKMS_BILL_NO.test(needle);
     // 상임위 이름은 대수 범위 안에서 코드로 해석한다(실패 시 여기서 예외).
     const ageCmtId = await this.resolveCommitteeId(
       query.scCptPpostCmt,

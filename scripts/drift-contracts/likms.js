@@ -230,7 +230,12 @@ module.exports = {
         { path: 'totalPages', min: 1, label: '페이지 수(#pager_pages_text)' },
         { path: 'currentPage', equals: 1, label: '현재 페이지' },
         { path: 'items[].billId', pattern: '^PRC_', label: 'billId' },
-        { path: 'items[].billNo', pattern: '^\\d+$', label: '의안번호' },
+        // Hearing requests may have a ZZ-prefixed number, e.g. ZZ22145.
+        {
+          path: 'items[].billNo',
+          pattern: '^(?:ZZ)?[0-9]+$',
+          label: '의안번호',
+        },
         { path: 'items[].billName', filled: true, label: '의안명' },
         { path: 'items[].progressStatus', filled: true, label: '심사진행상태' },
         { path: 'items[].proposerKind', filled: true, label: '제안자구분' },

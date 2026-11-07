@@ -1154,6 +1154,10 @@ const SELF_TEST_GOOD_HTML =
 
 const SELF_TEST_LIB = { Config: { DOMAIN: 'https://example.test' } };
 
+const LIKMS_LIST_BILL_NO_FIELD = manifest.SITES.find((site) => site.id === 'likms')
+  .checks.find((check) => check.id === 'likms/state-list-parse')
+  .fields.find((field) => field.path === 'items[].billNo');
+
 // Reduced live row structure captured on 2026-10-29; no referrals are required.
 function checkCommitteeFixture(
   sourceCommittee,
@@ -1244,6 +1248,22 @@ const SELF_TEST_CASES = [
         ],
       ),
   },
+  ...[
+    ['mixed', ['2222564', 'ZZ22145'], 'ok'],
+    ['empty', ['2222564', ''], 'drift'],
+    ['missing-digits', ['ZZ'], 'drift'],
+    ['unknown-prefix', ['AB22145'], 'drift'],
+  ].map(([name, billNumbers, expected]) => ({
+    id: `self/likms-list-bill-no-${name}`,
+    label: `LIKMS list bill number: ${name}`,
+    expected,
+    run: () =>
+      expectField(
+        { items: billNumbers.map((billNo) => ({ billNo })) },
+        LIKMS_LIST_BILL_NO_FIELD,
+        { lib: SELF_TEST_LIB },
+      ),
+  })),
   {
     id: 'self/nsm-reason-empty-pre',
     label: 'NSM reason empty-pre',
