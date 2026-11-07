@@ -1,3 +1,6 @@
+/** LIKMS also assigns ZZ-prefixed numbers to non-legislative items. */
+export const LIKMS_BILL_NO_PATTERN = '(?:ZZ)?[0-9]+';
+
 export enum Config {
   DOMAIN = 'https://pal.assembly.go.kr',
   LIST_URL = '/napal/lgsltpa/lgsltpaOngoing/list.do',
