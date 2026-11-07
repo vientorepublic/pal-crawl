@@ -1,7 +1,11 @@
 import { URL } from 'url';
 import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
-import { Config } from './config';
+import { Config, LIKMS_BILL_NO_PATTERN } from './config';
+
+const LIKMS_DETAIL_TITLE_PREFIX = new RegExp(
+  `^\\[(${LIKMS_BILL_NO_PATTERN})\\]\\s*`,
+);
 
 export interface IAttachment {
   pdfFile: string | null;
@@ -845,7 +849,7 @@ export interface ILikmsDocAttachment {
  * 따라서 각 필드는 **전달된 HTML에 들어 있는 값만** 채워진다(없으면 빈 문자열·`null`·빈 배열).
  */
 export interface ILikmsDetailInfo {
-  /** 의안명 — `[2221883] ` 접두는 제거하고 발의자 괄호는 유지한다 */
+  /** Title without the leading bill number; retains the proposer suffix. */
   title: string;
   billNo: string;
   /** 제안자 (예: "주진우의원 등 10인") */
@@ -997,14 +1001,16 @@ export class LikmsDetailParser {
     const rawTitle = (
       $('h3.detailh3').first().attr('title') ?? $('h3.detailh3').first().text()
     ).trim();
-    const title = this.normalizeText(rawTitle)
-      .replace(/^\[\d+\]\s*/, '')
-      .trim();
+    const normalizedTitle = this.normalizeText(rawTitle);
+    const titlePrefix = normalizedTitle.match(LIKMS_DETAIL_TITLE_PREFIX);
+    const title = titlePrefix
+      ? normalizedTitle.slice(titlePrefix[0].length)
+      : normalizedTitle;
 
     const pageBillNo = (
       $('#form input[name="billNo"]').attr('value') ?? ''
     ).trim();
-    const titleBillNo = rawTitle.match(/^\s*\[(\d+)\]/)?.[1] ?? '';
+    const titleBillNo = titlePrefix?.[1] ?? '';
 
     const billNo =
       this.cellText($('#insc-rcp-row td.billNo span').first().text()) ||

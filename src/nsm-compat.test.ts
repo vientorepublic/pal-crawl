@@ -260,6 +260,15 @@ describe('LikmsNsmAdapter', () => {
       expect(text.postBody().has('billNo')).toBe(false);
     });
 
+    test('routes a prefixed scBlNmSct bill number to billNo', async () => {
+      const { adapter, postBody } = setup();
+
+      await adapter.search({ scBlNmSct: ' ZZ22145 ' });
+
+      expect(postBody().get('billNo')).toBe('ZZ22145');
+      expect(postBody().has('billNm')).toBe(false);
+    });
+
     test('drops fields that have no likms equivalent', async () => {
       const { adapter, postBody } = setup();
 

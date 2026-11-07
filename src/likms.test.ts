@@ -460,6 +460,28 @@ describe('LikmsDetailParser', () => {
       expect(detail.proposalReason).toBe(EXPECTED_LIKMS_REASON);
     });
 
+    test.each([
+      '<form id="form"><input name="billNo" value="ZZ22145"></form>',
+      '',
+    ])('strips a prefixed bill number from the title (form: %j)', (form) => {
+      const detail = parser.parseDetail(
+        '<h3 class="detailh3">[ZZ22145]  인사청문요청안 제출(대통령)</h3>' +
+          form,
+      );
+
+      expect(detail.title).toBe('인사청문요청안 제출(대통령)');
+      expect(detail.billNo).toBe('ZZ22145');
+    });
+
+    test('preserves a bracketed title that is not a bill number', () => {
+      const detail = parser.parseDetail(
+        '<h3 class="detailh3">[AB22145] 인사청문요청안 제출</h3>',
+      );
+
+      expect(detail.title).toBe('[AB22145] 인사청문요청안 제출');
+      expect(detail.billNo).toBe('');
+    });
+
     test('reads proposer, session and documents', () => {
       const detail = parser.parseDetail(LIKMS_BILL_INFO_FRAGMENT_FULL_HTML);
 
@@ -984,6 +1006,30 @@ describe('LikmsStateParser', () => {
       expect(item.committee).toBe('');
       expect(item.progressStatus).toBe('접수');
       expect(item.proposer).toBe('문진석의원 등 11인');
+    });
+
+    test('preserves prefixed bill numbers from live list markup', () => {
+      const result = parser.parseList(`
+        <div id="state-list"><table><tbody><tr>
+          <td class="billNo mnone" title="ZZ22145">ZZ22145</td>
+          <td class="align_left">
+            <a data-bill_no="ZZ22145" data-bill-id="PRC_F6B0D23033474CCABBB7FE9C946E78">
+              인사청문요청안 제출(대통령)
+            </a>
+          </td>
+          <td class="proposerKindName" title="기타">기타</td>
+          <td class="proposeDt" title="2026-11-06">2026-11-06</td>
+          <td class="currCmt"></td>
+          <td class="procStageName" title="접수">접수</td>
+        </tr></tbody></table></div>
+      `);
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).toMatchObject({
+        billNo: 'ZZ22145',
+        billId: 'PRC_F6B0D23033474CCABBB7FE9C946E78',
+        proposerKind: '기타',
+      });
     });
 
     test('skips the "no data" row', () => {

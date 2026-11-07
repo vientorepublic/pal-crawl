@@ -814,6 +814,8 @@ console.log(likms.parseProposalReason(fragmentHtml));
 
 `LikmsStateCrawler`는 [국회 의안정보시스템](https://likms.assembly.go.kr)의 **의안현황 > 계류의안** 목록(`mooringBillPage.do`)을 수집합니다. 국민참여입법센터 `NsmLmSts`의 계류 법안 조회를 대체할 수 있도록 `search` / `getPage` / `getAllPages` 구조를 그대로 제공합니다.
 
+`billNo`는 문자열입니다. 일반 의안의 숫자 번호 외에 인사청문요청안처럼 `ZZ22145` 형식도 반환하므로, 숫자로 변환하지 않고 그대로 사용하세요.
+
 이 페이지는 목록을 AJAX(POST)로 채우고 Spring Security CSRF 토큰을 요구합니다. 크롤러는 첫 요청에서 페이지의 `<meta name="_csrf">` 토큰·세션 쿠키와 `#form` 숨김 필드를 확보해 캐시하고, 검색 본문은 그 숨김 필드를 기본값으로 깔고 요청 조건으로 덮어씁니다(브라우저가 폼을 직렬화해 보내는 방식과 동일). 토큰은 `X-CSRF-TOKEN` 헤더로 전송하며, 세션/CSRF 거부(401·403) 시 1회 자동 재발급·재시도합니다.
 
 > 숨김 필드를 함께 보내는 이유: 최소 파라미터만 보내면 서버가 **발의자 필터를 조용히 무시**합니다. 발의자 필터는 **의원 ID**(`representId`) + `representKindCd`를 함께 보내야 실제로 걸립니다(실측 확인). 서버도 크롤러도 **제안자명을 해석하지 않습니다** — 이름만으로는 어느 의원인지 확정할 수 없기 때문입니다. 이름밖에 모를 때는 [`findRepresentCandidates`](#발의자-후보-조회-findrepresentcandidates)로 사이트가 제시하는 후보를 보고 `membId`를 고릅니다.
@@ -1181,7 +1183,7 @@ likms 의안상세는 응답이 둘로 나뉜다(제목은 상세 페이지, 발
 | `scPpsUsr`                        | — (미지원)                         | 제안자명 — likms는 이름을 받지 않아 옮길 수 없다. 지정하면 예외를 던진다(조용히 무시하면 필터가 빠진 전체 결과가 나옴). `adapter.likms.findRepresentCandidates()`로 후보를 골라 `representId`로 조회 |
 | `searchStDtNew` / `searchEdDtNew` | `fromPropDt` / `toPropDt`          | 제안일자 — likms는 **양쪽 모두** 줘야 서버가 적용(한쪽만이면 전체). NSM은 `YYYYMMDD`여야 하므로(`YYYY-MM-DD` 양쪽 → 0건) 형식을 그대로 옮기면 필터가 사라진다                                        |
 | `sortOrder`                       | `ordCd`                            | ASC/DESC                                                                                                                                                                                             |
-| `scBlNmSct`                       | `billNo`(숫자) 또는 `billNm`(문자) | 값 형태로 판별                                                                                                                                                                                       |
+| `scBlNmSct`                       | `billNo` 또는 `billNm`             | 숫자 또는 `ZZ` 접두가 붙은 숫자는 번호로, 그 외는 제목으로 조회                                                                                                                                           |
 
 동일 축이 없어 무시되는 필드: `rslRsltNmL`, `rslRsltNmR`, `cptOfiOrgCd`, `sortCol`, `issLawitmYn`, `stDt`/`edDt`.
 
